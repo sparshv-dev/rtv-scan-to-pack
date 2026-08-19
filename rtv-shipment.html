@@ -1,0 +1,1621 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ship a Return — RTV</title>
+<style>
+:root {
+  --ink: #1A1A1A; --paper: #FAFAFA; --paper-raised: #FFFFFF;
+  --accent: #B23A1E; --line: #E2E2E2; --muted: #6B6B6B; --zebra: #F2F2F2;
+  --bad: #B23A1E; --shadow: rgba(0, 0, 0, 0.12);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --ink:#EDEDED; --paper:#121212; --paper-raised:#1C1C1C; --accent:#E2703A; --line:#333333; --muted:#9A9A9A; --zebra:#202020; --bad:#E2703A; --shadow:rgba(0,0,0,0.5); }
+}
+:root[data-theme="dark"] { --ink:#EDEDED; --paper:#121212; --paper-raised:#1C1C1C; --accent:#E2703A; --line:#333333; --muted:#9A9A9A; --zebra:#202020; --bad:#E2703A; --shadow:rgba(0,0,0,0.5); }
+:root[data-theme="light"] { --ink:#1A1A1A; --paper:#FAFAFA; --paper-raised:#FFFFFF; --accent:#B23A1E; --line:#E2E2E2; --muted:#6B6B6B; --zebra:#F2F2F2; --bad:#B23A1E; --shadow:rgba(0,0,0,0.12); }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: -apple-system,"Segoe UI","Helvetica Neue",Arial,sans-serif; }
+.mono { font-family: "SF Mono","Cascadia Mono",Consolas,"Roboto Mono",monospace; font-variant-numeric: tabular-nums; }
+a { color: var(--accent); }
+
+.app-shell { max-width: 720px; margin: 0 auto; padding: 28px 20px 90px; }
+.app-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+.eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin: 0 0 4px; }
+.app-head h1 { margin: 0; font-size: 21px; font-weight: 800; letter-spacing: -0.01em; }
+
+.card { background: var(--paper-raised); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; margin-bottom: 18px; }
+.card h2 { margin: 0 0 4px; font-size: 15px; font-weight: 800; }
+.card .hint { margin: 0 0 16px; font-size: 12.5px; color: var(--muted); max-width: 62ch; }
+
+.field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field.span-2 { grid-column: 1 / -1; }
+.field label { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.field input, .field select { font: inherit; font-size: 13.5px; padding: 9px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+.field input:focus, .field select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.field .row-inline { display: flex; gap: 8px; align-items: center; }
+.field .row-inline select { flex: 1; }
+.card > textarea { width: 100%; font: inherit; font-size: 13.5px; padding: 9px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); resize: vertical; }
+.card > textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.link-btn { font: inherit; font-size: 12px; font-weight: 700; background: none; border: none; color: var(--accent); cursor: pointer; padding: 2px 0; text-align: left; width: fit-content; }
+.btn { font: inherit; font-weight: 700; font-size: 13px; padding: 10px 18px; border-radius: 8px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper); cursor: pointer; }
+.btn:hover { opacity: 0.92; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.secondary { background: transparent; color: var(--ink); }
+.btn.small { padding: 6px 12px; font-size: 12px; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.inline-form { display: none; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; padding: 14px; border: 1px dashed var(--line); border-radius: 8px; background: var(--zebra); }
+.inline-form.is-open { display: grid; }
+.inline-form .field.span-2 { grid-column: 1 / -1; }
+.inline-form .actions { grid-column: 1 / -1; display: flex; gap: 8px; }
+
+table.data-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.data-table th { text-align: left; font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid var(--line); padding: 7px 8px; font-weight: 700; }
+table.data-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.data-table td input { width: 100%; font: inherit; font-size: 12.5px; padding: 5px 6px; border-radius: 5px; border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink); }
+table.data-table td input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+table.data-table td.num-col input { text-align: right; }
+table.data-table td.total-cell { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+table.data-table tr:hover td { background: var(--zebra); }
+.table-wrap { overflow-x: auto; border-radius: 8px; }
+.row-del { background: none; border: none; color: var(--bad); cursor: pointer; font-size: 15px; padding: 2px 6px; }
+
+.summary-bar { display: flex; gap: 22px; margin: 14px 0; flex-wrap: wrap; }
+.summary-bar .stat .num { font-size: 20px; font-weight: 800; }
+.summary-bar .stat .lbl { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+
+.toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 11px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; box-shadow: 0 8px 24px var(--shadow); opacity: 0; pointer-events: none; transition: opacity 0.2s ease, transform 0.2s ease; z-index: 50; }
+.toast.is-visible { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+.toast.is-error { background: var(--bad); }
+
+.empty-state { color: var(--muted); font-size: 13px; padding: 8px 0; }
+.recent-row-link { color: var(--ink); text-decoration: none; font-weight: 700; background: none; border: none; font: inherit; cursor: pointer; padding: 0; }
+.recent-row-link:hover { color: var(--accent); }
+.field-error { font-size: 11.5px; color: var(--bad); min-height: 14px; }
+
+#dumpFileInput { font: inherit; font-size: 12.5px; }
+
+/* ---- batch view: brand-wise tabs ---- */
+.brand-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; }
+.brand-tabs button { font: inherit; font-size: 12.5px; font-weight: 700; padding: 9px 15px; border-radius: 8px; border: 1px solid var(--line); background: var(--paper-raised); color: var(--muted); cursor: pointer; }
+.brand-tabs button[aria-selected="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.brand-panel { display: none; }
+.brand-panel.is-active { display: block; }
+.brand-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+.brand-panel-head b { font-size: 16px; }
+.brand-panel-head .meta { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+
+/* ---- print view chrome ---- */
+.print-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.print-toolbar .meta { font-size: 12px; color: var(--muted); }
+.print-toolbar .meta b { color: var(--ink); }
+.stage { display: flex; flex-direction: column; align-items: center; gap: 22px; padding: 28px; background: var(--zebra); border-radius: 14px; border: 1px solid var(--line); }
+.sheet-picker { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.sheet-picker button { font: inherit; font-size: 11.5px; font-weight: 700; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--paper-raised); color: var(--muted); cursor: pointer; }
+.sheet-picker button[aria-selected="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.sheet-view { display: none; }
+.sheet-view.is-active { display: block; }
+.sheet { background: #FFFFFF; color: #1A1A1A; box-shadow: 0 18px 40px var(--shadow); position: relative; }
+
+/* ---- box label: 4in x 6in, sized for a direct-thermal label printer ---- */
+.label-sheet { width: 4in; height: 6in; padding: 0.22in 0.24in; display: flex; flex-direction: column; gap: 0.12in; }
+.label-topbar { display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 3px solid #1A1A1A; padding-bottom: 0.1in; }
+.stamp { display: inline-flex; align-items: center; justify-content: center; width: 0.6in; height: 0.6in; border-radius: 999px; border: 3px solid #B23A1E; color: #B23A1E; font-weight: 900; font-size: 14px; letter-spacing: 0.02em; transform: rotate(-6deg); flex: none; }
+.label-topbar .brand { font-size: 10px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: #1A1A1A; }
+.label-topbar .service { font-size: 17px; font-weight: 900; letter-spacing: -0.01em; margin-top: 2px; }
+.box-count { text-align: right; font-size: 10px; color: #4D4D4D; align-self: flex-end; margin-top: -0.06in; }
+.box-count b { display: block; font-size: 20px; color: #1A1A1A; line-height: 1; margin-bottom: 2px; }
+.addr-block { display: flex; flex-direction: column; gap: 0.09in; }
+.addr-row .k { font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #6B6B6B; margin-bottom: 2px; }
+.addr-row.from .v { font-size: 11px; line-height: 1.32; color: #333333; }
+.addr-row.to { border: 2px solid #1A1A1A; padding: 0.07in 0.1in; border-radius: 3px; }
+.addr-row.to .v { font-size: 14px; font-weight: 700; line-height: 1.3; }
+.addr-row.to .v .vendor-name { display: block; font-size: 15.5px; font-weight: 900; margin-bottom: 1px; }
+.manifest { flex: 1; display: flex; flex-direction: column; justify-content: center; min-height: 0; overflow: hidden; }
+.manifest .k { font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #6B6B6B; margin-bottom: 3px; }
+.qty-summary { display: flex; align-items: baseline; gap: 0.1in; }
+.qty-summary .qty-num { font-size: 0.62in; font-weight: 900; line-height: 1; color: #1A1A1A; font-variant-numeric: tabular-nums; }
+.qty-summary .qty-lbl { font-size: 11px; color: #4D4D4D; font-weight: 600; }
+.manifest-more { font-size: 8.8px; color: #6B6B6B; margin-top: 8px; font-style: italic; }
+.label-footer { border-top: 1.5px dashed #B0B0B0; padding-top: 0.07in; display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; }
+.handling { display: flex; gap: 10px; }
+.handling .h-item { text-align: center; font-size: 7.5px; color: #4D4D4D; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+.handling .h-icon { font-size: 15px; display: block; margin-bottom: 1px; }
+.pod-note { text-align: right; font-size: 8px; color: #6B6B6B; max-width: 1.6in; line-height: 1.3; }
+
+/* ---- invoice: A4, Vendor Copy / Transporter Copy ---- */
+.invoice-sheet { width: 8.27in; height: 11.69in; padding: 0.6in 0.65in; display: flex; flex-direction: column; gap: 0.22in; }
+.copy-badge { position: absolute; top: 0.4in; right: 0.65in; font-size: 11px; font-weight: 800; letter-spacing: 0.1em; color: #B23A1E; border: 1.5px solid #B23A1E; border-radius: 999px; padding: 5px 14px; transform: rotate(4deg); }
+.invoice-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #1A1A1A; padding-bottom: 12px; }
+.invoice-head .brand-line { display: flex; align-items: center; gap: 11px; }
+.invoice-head .stamp { width: 0.55in; height: 0.55in; font-size: 13px; }
+.invoice-head .brand { font-size: 10.5px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: #6B6B6B; }
+.invoice-head h2 { margin: 3px 0 0; font-size: 22px; font-weight: 900; letter-spacing: -0.01em; }
+.invoice-head .meta { text-align: right; font-size: 12.5px; }
+.invoice-head .meta .row { margin-bottom: 3px; }
+.invoice-head .meta .k { color: #6B6B6B; margin-right: 6px; }
+.invoice-head .meta .v { font-weight: 700; }
+.invoice-summary { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; border: 1.5px solid #1A1A1A; border-radius: 4px; padding: 14px 16px; font-size: 13px; }
+.invoice-summary > div { display: contents; }
+.invoice-summary .k { font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #6B6B6B; white-space: nowrap; padding-top: 1px; }
+.invoice-summary .v { color: #1A1A1A; }
+.invoice-courier { border: 1.5px dashed #B23A1E; border-radius: 4px; padding: 12px 16px 6px; }
+.invoice-courier .k { font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #B23A1E; margin-bottom: 6px; }
+.invoice-courier .signfield { color: #1A1A1A; font-size: 12px; }
+.invoice-manifest { flex: 1; min-height: 0; overflow: hidden; }
+table.invoice-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.invoice-table th { text-align: left; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; color: #6B6B6B; border-bottom: 2px solid #1A1A1A; padding: 8px 10px; font-weight: 700; }
+table.invoice-table td { padding: 7px 10px; border-bottom: 1px solid #E5E5E5; }
+table.invoice-table tr:nth-child(even) td { background: #F5F5F5; }
+table.invoice-table td.num, table.invoice-table th.num { text-align: right; }
+table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1A; padding: 9px 10px; font-weight: 800; background: none; }
+.invoice-grand-total-label { text-align: right; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
+.invoice-grand-total-value { font-size: 14px; }
+.invoice-sign { display: flex; flex-direction: column; gap: 3px; border-top: 1.5px solid #1A1A1A; padding-top: 10px; }
+.signfield { font-size: 11px; color: #6B6B6B; display: flex; justify-content: space-between; border-bottom: 1px dotted #C2C2C2; padding: 9px 0 4px; }
+.invoice-foot { font-size: 10px; color: #6B6B6B; padding-top: 8px; border-top: 1px dashed #B0B0B0; }
+
+@media print {
+  body { padding: 0; background: #fff; }
+  .no-print { display: none !important; }
+  .stage { padding: 0; background: #fff; border: none; border-radius: 0; gap: 0; }
+  .sheet { box-shadow: none; }
+  .sheet-view { display: none !important; }
+  .sheet-view.print-include { display: block !important; page-break-after: always; }
+  .sheet-view.print-include:last-child { page-break-after: auto; }
+  @page { margin: 0; }
+}
+</style>
+<style id="dynamicPageSize"></style>
+</head>
+<body>
+
+<div class="app-shell" id="formView">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · B2B reverse logistics</p>
+      <h1>Ship a return</h1>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Shipping details</h2>
+    <div class="field-grid">
+      <div class="field">
+        <label for="hubSelect">Shipping from</label>
+        <div class="row-inline">
+          <select id="hubSelect"></select>
+          <button type="button" class="link-btn" id="toggleNewHub" style="white-space:nowrap;">+ New hub</button>
+        </div>
+      </div>
+      <div class="field"><label for="shipDateInput">Ship date</label><input id="shipDateInput" type="date"></div>
+    </div>
+
+    <div class="inline-form" id="newHubForm">
+      <div class="field"><label>Hub name</label><input id="nh-name" placeholder="Zilo Ghatkopar Return Hub"></div>
+      <div class="field"><label>Short code</label><input id="nh-code" placeholder="GHK" maxlength="6"></div>
+      <div class="field span-2"><label>Address</label><input id="nh-address" placeholder="Unit 4, Everest Industrial Estate, LBS Marg, Ghatkopar (W), Mumbai 400086"></div>
+      <div class="field"><label>Phone</label><input id="nh-phone" placeholder="+91 22 6801 4400"></div>
+      <div class="actions">
+        <button type="button" class="btn small" id="saveHub">Save hub</button>
+        <button type="button" class="btn small secondary" id="cancelHub">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Import daily dump</h2>
+    <p class="hint">Upload today's tracking dump (CSV, header row required): <b>Tracking ID, Marketplace Order ID, Return ID, Seller name, RTV Shipment ID, TMS Provider name, RTV Shipment Status, RTV Created At, RTV tracking id, Value, Order set ID</b>. A Tracking ID already in the database gets all its fields updated to the new values; a new Tracking ID is added. Only Tracking ID, Value and Qty (scanned at 1 per item) show up on the printed invoice — everything else is kept for reference. <button type="button" class="link-btn" id="downloadSampleDumpCsv" style="display:inline; white-space:nowrap;">Download sample CSV</button></p>
+    <input type="file" id="dumpFileInput" accept=".csv,text/csv">
+    <p class="field-error" id="dumpError"></p>
+  </div>
+
+  <div class="card">
+    <h2>Scan to pack</h2>
+    <p class="hint">Pick the brand this box is going to, then scan or type each tracking ID and press Enter — its value is looked up automatically and the item is added straight to the box. Close the box once it's packed, then finish the shipment(s) to print labels &amp; invoices.</p>
+
+    <div class="field-grid">
+      <div class="field">
+        <label for="boxVendorSelect">Brand for this box</label>
+        <div class="row-inline">
+          <select id="boxVendorSelect"></select>
+          <button type="button" class="link-btn" id="toggleNewBrand" style="white-space:nowrap;">+ Add new brand</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="inline-form" id="newBrandForm">
+      <div class="field"><label>Brand / vendor name</label><input id="nb-name" placeholder="Arrow"></div>
+      <div class="field"><label>Short name</label><input id="nb-shortName" placeholder="ARW" maxlength="10"></div>
+      <div class="field span-2"><label>Address</label><input id="nb-address" placeholder="WH No. 4, Omni Return QC Center, Bhiwandi, Thane, Maharashtra 421101"></div>
+      <div class="field"><label>Contact phone</label><input id="nb-contactPhone" placeholder="+91 98200 44117"></div>
+      <div class="actions">
+        <button type="button" class="btn small" id="saveBrand">Save brand</button>
+        <button type="button" class="btn small secondary" id="cancelBrand">Cancel</button>
+      </div>
+    </div>
+
+    <div class="field-grid" style="margin-top:14px;">
+      <div class="field span-2">
+        <label for="scanInput">Scan tracking ID</label>
+        <input id="scanInput" placeholder="Select a brand above first" autocomplete="off" disabled>
+      </div>
+    </div>
+    <p class="field-error" id="scanError"></p>
+
+    <div class="inline-form" id="pendingItemForm" style="margin-top:4px;">
+      <div class="field"><label>Tracking ID</label><input id="pi-tracking" disabled></div>
+      <div class="field"><label>Value</label><input id="pi-value" type="number" min="0" step="0.01" placeholder="1299"></div>
+      <div class="field"><label>Qty</label><input id="pi-qty" type="number" min="1" step="1" value="1"></div>
+      <div class="actions">
+        <button type="button" class="btn small" id="pi-add">Add to box</button>
+        <button type="button" class="btn small secondary" id="pi-cancel">Cancel</button>
+      </div>
+    </div>
+
+    <div class="summary-bar">
+      <div class="stat"><div class="num" id="boxNumStat">1</div><div class="lbl">Current box</div></div>
+      <div class="stat"><div class="num" id="boxQtyStat">0</div><div class="lbl">Box qty</div></div>
+      <div class="stat"><div class="num mono" id="boxAmountStat">₹0.00</div><div class="lbl">Box amount</div></div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>Tracking</th><th>Brand</th><th class="num-col">Value</th><th class="num-col">Qty</th><th class="num-col">Amount</th><th></th></tr></thead><tbody id="boxBody"></tbody></table>
+    </div>
+    <p class="empty-state" id="boxEmpty">No items scanned into this box yet.</p>
+    <button type="button" class="btn secondary" id="closeBoxBtn" style="margin-top:14px;">Close box &amp; start next</button>
+
+    <div style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line);">
+      <div class="summary-bar">
+        <div class="stat"><div class="num" id="sessionBoxesStat">0</div><div class="lbl">Boxes closed</div></div>
+        <div class="stat"><div class="num" id="sessionQtyStat">0</div><div class="lbl">Total qty</div></div>
+        <div class="stat"><div class="num mono" id="sessionAmountStat">₹0.00</div><div class="lbl">Total amount</div></div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table"><thead><tr><th>Box</th><th>Brand(s)</th><th>Items</th><th class="num-col">Qty</th><th class="num-col">Amount</th><th></th></tr></thead><tbody id="closedBoxesBody"></tbody></table>
+      </div>
+      <p class="empty-state" id="closedBoxesEmpty">No boxes closed yet.</p>
+      <button type="button" class="btn" id="finishShipmentBtn" style="margin-top:14px;" disabled>Finish shipment(s) &amp; print</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Recent shipments</h2>
+    <p class="hint">Reopen any past shipment to reprint its box labels or invoice copies.</p>
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>Invoice No.</th><th>Ship date</th><th>Hub</th><th>Vendor</th><th>Boxes</th><th>Units</th><th>Amount</th></tr></thead><tbody id="recentBody"></tbody></table>
+    </div>
+    <p class="empty-state" id="recentEmpty" style="display:none;">No shipments created yet.</p>
+  </div>
+</div>
+
+<div class="app-shell" id="printView" style="display:none;">
+  <div class="app-head no-print">
+    <div>
+      <p class="eyebrow">Return to Vendor · <span id="challanNo" class="mono"></span></p>
+      <h1 id="pageTitle">Print shipment</h1>
+    </div>
+    <button type="button" class="link-btn" id="backLink">&larr; Back</button>
+  </div>
+  <div class="print-toolbar no-print">
+    <div class="meta"><b id="metaVendor"></b> · <span id="metaHub"></span> · <span id="metaTotals"></span></div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button type="button" class="btn secondary" id="printOneBtn">Print this sheet</button>
+      <button type="button" class="btn secondary" id="printLabelsBtn">Print box label(s) — 4×6</button>
+      <button type="button" class="btn" id="printInvoicesBtn">Print both invoices — A4</button>
+    </div>
+  </div>
+  <p class="no-print" style="margin: -8px 0 4px; font-size: 12.5px; color: var(--muted); max-width: 62ch;">Box labels and invoices are printed as separate jobs, at their own paper size — send them to your label printer and office printer separately.</p>
+  <div class="stage">
+    <div class="sheet-picker no-print" id="sheetPicker"></div>
+    <div id="sheetsContainer"></div>
+  </div>
+</div>
+
+<div class="app-shell" id="batchView" style="display:none; max-width: 1040px;">
+  <div class="app-head no-print">
+    <div>
+      <p class="eyebrow">Return to Vendor · multi-brand batch</p>
+      <h1 id="batchTitle">Batch</h1>
+    </div>
+    <button type="button" class="link-btn" id="batchBackLink">&larr; Back</button>
+  </div>
+  <div class="brand-tabs" id="brandTabs" role="tablist"></div>
+  <div id="brandPanels"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ================= backend API =================
+  // All hubs/vendors/master lookup data/shipments now live in the local
+  // rtv-shipment.db SQLite database via rtv-shipment-server.py — nothing is
+  // kept in localStorage anymore, so the data survives clearing browser data.
+  function fetchJson(url, opts) {
+    return fetch(url, opts).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (data) {
+        if (!res.ok) throw new Error((data && data.error) || ("Request failed (" + res.status + ")"));
+        return data;
+      });
+    });
+  }
+  function getJson(url) { return fetchJson(url); }
+  function postJson(url, body) {
+    return fetchJson(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  }
+
+  var state = {
+    hubs: [],
+    vendors: [],
+  };
+
+  // ================= toast =================
+  var toastEl = document.getElementById("toast");
+  var toastTimer = null;
+  function toast(message, isError) {
+    toastEl.textContent = message;
+    toastEl.classList.toggle("is-error", !!isError);
+    toastEl.classList.add("is-visible");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toastEl.classList.remove("is-visible"); }, 3200);
+  }
+
+  function escapeHtml(str) {
+    return String(str == null ? "" : str).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  // ================= hubs / vendors =================
+  function fillSelect(select, items, labelFn) {
+    var current = select.value;
+    select.innerHTML = "";
+    if (items.length === 0) {
+      var opt = document.createElement("option");
+      opt.textContent = "None saved yet — add one";
+      opt.value = "";
+      select.appendChild(opt);
+      return;
+    }
+    items.forEach(function (item) {
+      var opt = document.createElement("option");
+      opt.value = item.id;
+      opt.textContent = labelFn(item);
+      select.appendChild(opt);
+    });
+    if (current) select.value = current;
+  }
+
+  function refreshHubSelect() {
+    fillSelect(document.getElementById("hubSelect"), state.hubs, function (h) { return h.name + " (" + h.code + ")"; });
+  }
+  function vendorLabel(v) {
+    return v.name + (v.shortName ? " (" + v.shortName + ")" : "") + (v.warehouseLabel ? " — " + v.warehouseLabel : "");
+  }
+
+  function wireToggle(btnId, formId) {
+    document.getElementById(btnId).addEventListener("click", function () {
+      document.getElementById(formId).classList.toggle("is-open");
+    });
+  }
+  wireToggle("toggleNewHub", "newHubForm");
+  document.getElementById("cancelHub").addEventListener("click", function () {
+    document.getElementById("newHubForm").classList.remove("is-open");
+  });
+
+  document.getElementById("saveHub").addEventListener("click", function () {
+    var name = document.getElementById("nh-name").value.trim();
+    var address = document.getElementById("nh-address").value.trim();
+    if (!name || !address) { toast("Hub name and address are required", true); return; }
+    var code = document.getElementById("nh-code").value.trim().toUpperCase() || name.replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase() || "HUB";
+    postJson("/api/hubs", { name: name, address: address, code: code, phone: document.getElementById("nh-phone").value.trim() })
+      .then(function (hub) {
+        state.hubs.push(hub);
+        refreshHubSelect();
+        document.getElementById("hubSelect").value = hub.id;
+        document.getElementById("newHubForm").classList.remove("is-open");
+        ["nh-name", "nh-code", "nh-address", "nh-phone"].forEach(function (id) { document.getElementById(id).value = ""; });
+        toast("Hub saved: " + hub.name);
+      })
+      .catch(function (err) { toast("Couldn't save hub: " + err.message, true); });
+  });
+
+  // ================= sheet rendering =================
+  function formatDate(iso) {
+    if (!iso) return "";
+    var d = new Date(iso + "T00:00:00");
+    if (isNaN(d)) return iso;
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  }
+
+  function labelSheetHtml(shipment, box, boxIndex, totalBoxes) {
+    var boxQty = box.rows.reduce(function (sum, r) { return sum + (r.qty || 0); }, 0);
+    var boxLines = box.rows.length;
+    return (
+      "<div class='sheet label-sheet'>" +
+        "<div class='label-topbar'><div><div class='brand'>Zilo Reverse Logistics</div><div class='service'>RETURN TO VENDOR</div></div><div class='stamp'>RTV</div></div>" +
+        "<div class='box-count'><b>Box " + boxIndex + " of " + totalBoxes + "</b>Packed " + formatDate(shipment.shipDate) + " · " + escapeHtml(shipment.hub.name) + "</div>" +
+        "<div class='addr-block'>" +
+          "<div class='addr-row from'><div class='k'>From</div><div class='v'>" + escapeHtml(shipment.hub.name) + " — " + escapeHtml(shipment.hub.address) + (shipment.hub.phone ? " · " + escapeHtml(shipment.hub.phone) : "") + "</div></div>" +
+          "<div class='addr-row to'><div class='k'>Deliver to warehouse</div><div class='v'>" +
+            "<span class='vendor-name'>" + escapeHtml(shipment.vendor.name) + (shipment.vendor.warehouseLabel ? " — " + escapeHtml(shipment.vendor.warehouseLabel) : "") + "</span>" +
+            escapeHtml(shipment.vendor.address) +
+            (shipment.vendor.contactPhone ? "<br>Attn: " + escapeHtml(shipment.vendor.contactName || "Inbound Receiving") + " · " + escapeHtml(shipment.vendor.contactPhone) : "") +
+          "</div></div>" +
+        "</div>" +
+        "<div class='manifest'>" +
+          "<div class='k'>Contents — this box</div>" +
+          "<div class='qty-summary'><div class='qty-num'>" + boxQty + "</div><div class='qty-lbl'>unit" + (boxQty === 1 ? "" : "s") + " · " + boxLines + " return line" + (boxLines === 1 ? "" : "s") + "</div></div>" +
+          "<div class='manifest-more'>Tracking detail is on the invoice packed with this shipment</div>" +
+        "</div>" +
+        "<div class='label-footer'>" +
+          "<div class='handling'><div class='h-item'><span class='h-icon'>&#9730;</span>Keep dry</div><div class='h-item'><span class='h-icon'>&#9888;</span>No stacking</div></div>" +
+          "<div class='pod-note'>Recipient: sign &amp; return the invoice packed with this shipment.</div>" +
+        "</div>" +
+      "</div>"
+    );
+  }
+
+  function formatMoney(v) {
+    return "₹" + Number(v || 0).toFixed(2);
+  }
+
+  // Tolerant number parser for Value cells that may come formatted as
+  // "₹1,299.00" or "1,299" — plain parseFloat stops at the first comma and
+  // silently returns the wrong (truncated) number instead of failing loudly.
+  function parseMoneyLoose(raw) {
+    var cleaned = String(raw == null ? "" : raw).replace(/[^0-9.\-]/g, "");
+    if (!cleaned) return NaN;
+    return parseFloat(cleaned);
+  }
+
+  function invoiceSheetHtml(shipment, copyType) {
+    var rowsHtml = shipment.manifest.map(function (r) {
+      return "<tr><td class='mono'>" + escapeHtml(r.tracking) + "</td><td class='num mono'>" + formatMoney(r.mrp) + "</td><td class='num'>" + r.qty + "</td><td class='num'>" + r.boxNo + "</td><td class='num mono'>" + formatMoney(r.mrp * r.qty) + "</td></tr>";
+    }).join("");
+    var grandTotal = shipment.manifest.reduce(function (sum, r) { return sum + (r.mrp || 0) * (r.qty || 0); }, 0);
+    var isVendor = copyType === "vendor";
+    var badgeText = isVendor ? "VENDOR COPY" : "TRANSPORTER COPY";
+    var signLabel = isVendor ? "Received by — vendor warehouse" : "Handed over to — transporter";
+    var totals = shipmentTotals(shipment);
+    return (
+      "<div class='sheet invoice-sheet'>" +
+        "<div class='copy-badge'>" + badgeText + "</div>" +
+        "<div class='invoice-head'>" +
+          "<div class='brand-line'><div class='stamp'>RTV</div><div><div class='brand'>Zilo Reverse Logistics</div><h2>Return Delivery Invoice</h2></div></div>" +
+          "<div class='meta'>" +
+            "<div class='row'><span class='k'>Invoice No.</span><span class='v mono'>" + escapeHtml(shipment.invoiceNo) + "</span></div>" +
+            "<div class='row'><span class='k'>Date</span><span class='v mono'>" + formatDate(shipment.shipDate) + "</span></div>" +
+          "</div>" +
+        "</div>" +
+        "<div class='invoice-summary'>" +
+          "<div><span class='k'>From</span><span class='v'>" + escapeHtml(shipment.hub.name) + " — " + escapeHtml(shipment.hub.address) + "</span></div>" +
+          "<div><span class='k'>To</span><span class='v'>" + escapeHtml(shipment.vendor.name) + (shipment.vendor.warehouseLabel ? " — " + escapeHtml(shipment.vendor.warehouseLabel) : "") + " — " + escapeHtml(shipment.vendor.address) + "</span></div>" +
+          "<div><span class='k'>Packages</span><span class='v'>" + totals.boxes + " box" + (totals.boxes === 1 ? "" : "es") + " · " + totals.returns + " returns · " + totals.units + " units</span></div>" +
+        "</div>" +
+        "<div class='invoice-courier'>" +
+          "<div class='k'>Courier details — to be filled in at handover</div>" +
+          "<div class='signfield'><span>Courier</span><span></span></div>" +
+          "<div class='signfield'><span>AWB / Tracking No.</span><span></span></div>" +
+        "</div>" +
+        "<div class='invoice-manifest'>" +
+          "<table class='invoice-table'><thead><tr><th>Tracking</th><th class='num'>Value</th><th class='num'>Qty</th><th class='num'>Box</th><th class='num'>Total</th></tr></thead><tbody>" + rowsHtml + "</tbody>" +
+          "<tfoot><tr><td colspan='4' class='invoice-grand-total-label'>Grand Total</td><td class='num mono invoice-grand-total-value'>" + formatMoney(grandTotal) + "</td></tr></tfoot></table>" +
+        "</div>" +
+        "<div class='invoice-sign'>" +
+          "<div class='signfield'><span>" + signLabel + " — name &amp; signature</span><span></span></div>" +
+          "<div class='signfield'><span>Date / time</span><span></span></div>" +
+        "</div>" +
+        "<div class='invoice-foot'>Delivery document for movement of returned goods to vendor warehouse — not a GST tax invoice. Retain this copy as the " + (isVendor ? "vendor's" : "transporter's") + " record of handover.</div>" +
+      "</div>"
+    );
+  }
+
+  function shipmentTotals(shipment) {
+    var boxes = new Set(shipment.manifest.map(function (r) { return r.boxNo; }));
+    var units = shipment.manifest.reduce(function (sum, r) { return sum + r.qty; }, 0);
+    return { boxes: boxes.size, returns: shipment.manifest.length, units: units };
+  }
+  function shipmentBoxes(shipment) {
+    var boxNos = Array.from(new Set(shipment.manifest.map(function (r) { return r.boxNo; }))).sort(function (a, b) { return a - b; });
+    return boxNos.map(function (bn) { return { boxNo: bn, rows: shipment.manifest.filter(function (r) { return r.boxNo === bn; }) }; });
+  }
+
+  // ================= PDF generation (no external library) =================
+  // Standard Helvetica AFM character widths (1/1000 em), codes 32-126. Used for
+  // wrapping/right-alignment/truncation estimates — no font embedding needed since
+  // Helvetica is one of the 14 standard PDF fonts every viewer supplies.
+  var HELV_WIDTHS = {32:278,33:278,34:355,35:556,36:556,37:889,38:667,39:191,40:333,41:333,42:389,43:584,44:278,45:333,46:278,47:278,48:556,49:556,50:556,51:556,52:556,53:556,54:556,55:556,56:556,57:556,58:278,59:278,60:584,61:584,62:584,63:556,64:1015,65:667,66:667,67:722,68:722,69:667,70:611,71:778,72:722,73:278,74:500,75:667,76:556,77:833,78:722,79:778,80:667,81:778,82:722,83:667,84:611,85:722,86:667,87:944,88:667,89:667,90:611,91:278,92:278,93:278,94:469,95:556,96:333,97:556,98:556,99:500,100:556,101:556,102:278,103:556,104:556,105:222,106:222,107:500,108:222,109:833,110:556,111:556,112:556,113:556,114:333,115:500,116:278,117:556,118:500,119:722,120:500,121:500,122:500,123:334,124:260,125:334,126:584};
+  function pdfCharWidth(code, bold) {
+    var w = HELV_WIDTHS[code] || 556;
+    return bold ? w * 1.08 : w;
+  }
+  function pdfTextWidth(str, size, bold) {
+    var sum = 0;
+    for (var i = 0; i < str.length; i++) sum += pdfCharWidth(str.charCodeAt(i), bold);
+    return (sum / 1000) * size;
+  }
+  // PDF's standard fonts only cover Latin-1-ish characters (no rupee sign) — sanitize
+  // everything to plain ASCII so text is guaranteed to render correctly.
+  function pdfSafe(str) {
+    return String(str == null ? "" : str)
+      .replace(/₹/g, "Rs. ")
+      .replace(/[‘’]/g, "'")
+      .replace(/[“”]/g, '"')
+      .replace(/[–—]/g, "-")
+      .replace(/…/g, "...")
+      .replace(/•/g, "*")
+      .replace(/[^\x20-\x7E]/g, "?");
+  }
+  function pdfEscape(str) {
+    return pdfSafe(str).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  }
+  function pdfTruncate(str, maxWidthPt, size) {
+    str = pdfSafe(str);
+    if (pdfTextWidth(str, size, false) <= maxWidthPt) return str;
+    var lo = 0, hi = str.length;
+    while (lo < hi) {
+      var mid = Math.ceil((lo + hi) / 2);
+      var candidate = str.slice(0, mid) + "...";
+      if (pdfTextWidth(candidate, size, false) <= maxWidthPt) lo = mid; else hi = mid - 1;
+    }
+    return str.slice(0, lo) + "...";
+  }
+  function formatMoneyPdf(v) { return "Rs. " + Number(v || 0).toFixed(2); }
+
+  var PDF_INK = [0.1, 0.1, 0.1];
+  var PDF_MUTED = [0.42, 0.42, 0.42];
+  var PDF_ACCENT = [0.698, 0.227, 0.118];
+
+  function createPdfDoc() {
+    var pages = [];
+    var currentPage = null;
+
+    function newPage(w, h) {
+      currentPage = { w: w, h: h, ops: [] };
+      pages.push(currentPage);
+    }
+    function op(s) { currentPage.ops.push(s); }
+    function col(c) { return c[0].toFixed(3) + " " + c[1].toFixed(3) + " " + c[2].toFixed(3); }
+
+    function text(x, yFromTop, str, size, bold, color) {
+      color = color || PDF_INK;
+      var y = currentPage.h - yFromTop;
+      op("BT");
+      op(col(color) + " rg");
+      op((bold ? "/F2 " : "/F1 ") + size + " Tf");
+      op(x.toFixed(2) + " " + y.toFixed(2) + " Td");
+      op("(" + pdfEscape(str) + ") Tj");
+      op("ET");
+    }
+    function textRight(xRight, yFromTop, str, size, bold, color) {
+      var w = pdfTextWidth(pdfSafe(str), size, bold);
+      text(xRight - w, yFromTop, str, size, bold, color);
+    }
+    function textWrapped(x, yFromTop, maxWidth, str, size, bold, lineHeight, color) {
+      var words = pdfSafe(str).split(/\s+/).filter(Boolean);
+      var lines = [], cur = "";
+      words.forEach(function (w) {
+        var test = cur ? cur + " " + w : w;
+        if (pdfTextWidth(test, size, bold) > maxWidth && cur) { lines.push(cur); cur = w; }
+        else cur = test;
+      });
+      if (cur) lines.push(cur);
+      lines.forEach(function (ln, i) { text(x, yFromTop + i * lineHeight, ln, size, bold, color); });
+      return lines.length || 1;
+    }
+    function line(x1, y1, x2, y2, w, color) {
+      color = color || PDF_INK;
+      op(Math.max(w, 0.3).toFixed(2) + " w");
+      op(col(color) + " RG");
+      op(x1.toFixed(2) + " " + (currentPage.h - y1).toFixed(2) + " m");
+      op(x2.toFixed(2) + " " + (currentPage.h - y2).toFixed(2) + " l");
+      op("S");
+    }
+    function dashedLine(x1, y1, x2, y2, w, color, dashLen) {
+      color = color || PDF_INK;
+      op("[" + dashLen + " " + dashLen + "] 0 d");
+      op(Math.max(w, 0.3).toFixed(2) + " w");
+      op(col(color) + " RG");
+      op(x1.toFixed(2) + " " + (currentPage.h - y1).toFixed(2) + " m");
+      op(x2.toFixed(2) + " " + (currentPage.h - y2).toFixed(2) + " l");
+      op("S");
+      op("[] 0 d");
+    }
+    function rect(x, yFromTop, w, h, mode, strokeColor, fillColor, lineWidth) {
+      var y = currentPage.h - yFromTop - h;
+      if (fillColor) op(col(fillColor) + " rg");
+      if (strokeColor) { op((lineWidth || 1).toFixed(2) + " w"); op(col(strokeColor) + " RG"); }
+      op(x.toFixed(2) + " " + y.toFixed(2) + " " + w.toFixed(2) + " " + h.toFixed(2) + " re");
+      op(mode === "fill" ? "f" : mode === "fillstroke" ? "B" : "S");
+    }
+
+    function build() {
+      var catalogNum = 1, pagesNum = 2, fontRegNum = 3, fontBoldNum = 4;
+      var pageObjNums = [], contentObjNums = [];
+      var n = 5;
+      pages.forEach(function () { pageObjNums.push(n); n++; contentObjNums.push(n); n++; });
+
+      var objStrings = {};
+      objStrings[catalogNum] = "<< /Type /Catalog /Pages " + pagesNum + " 0 R >>";
+      objStrings[pagesNum] = "<< /Type /Pages /Kids [" + pageObjNums.map(function (pn) { return pn + " 0 R"; }).join(" ") + "] /Count " + pages.length + " >>";
+      objStrings[fontRegNum] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+      objStrings[fontBoldNum] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>";
+      pages.forEach(function (pg, i) {
+        var pageNum = pageObjNums[i], contentNum = contentObjNums[i];
+        objStrings[pageNum] = "<< /Type /Page /Parent " + pagesNum + " 0 R /MediaBox [0 0 " + pg.w.toFixed(2) + " " + pg.h.toFixed(2) + "] /Resources << /Font << /F1 " + fontRegNum + " 0 R /F2 " + fontBoldNum + " 0 R >> >> /Contents " + contentNum + " 0 R >>";
+        var stream = pg.ops.join("\n");
+        objStrings[contentNum] = "<< /Length " + stream.length + " >>\nstream\n" + stream + "\nendstream";
+      });
+
+      var maxObjNum = n - 1;
+      var out = "%PDF-1.4\n";
+      var byteOffsets = new Array(maxObjNum + 1);
+      for (var k = 1; k <= maxObjNum; k++) {
+        byteOffsets[k] = out.length;
+        out += k + " 0 obj\n" + objStrings[k] + "\nendobj\n";
+      }
+      var xrefStart = out.length;
+      out += "xref\n0 " + (maxObjNum + 1) + "\n";
+      out += "0000000000 65535 f \r\n";
+      for (var k2 = 1; k2 <= maxObjNum; k2++) {
+        out += String(byteOffsets[k2]).padStart(10, "0") + " 00000 n \r\n";
+      }
+      out += "trailer\n<< /Size " + (maxObjNum + 1) + " /Root " + catalogNum + " 0 R >>\nstartxref\n" + xrefStart + "\n%%EOF";
+      return out;
+    }
+
+    return { newPage: newPage, text: text, textRight: textRight, textWrapped: textWrapped, line: line, dashedLine: dashedLine, rect: rect, build: build };
+  }
+
+  function drawLabelPdfPage(pdf, shipment, box, boxIndex, totalBoxes) {
+    var W = 288, H = 432, pad = 16, contentW = W - pad * 2;
+    pdf.newPage(W, H);
+    var y = pad;
+    pdf.text(pad, y + 7, "ZILO REVERSE LOGISTICS", 7, true, PDF_MUTED);
+    pdf.textRight(W - pad, y + 8, "Box " + boxIndex + " of " + totalBoxes, 8, true, PDF_INK);
+    y += 14;
+    pdf.text(pad, y + 11, "RETURN TO VENDOR", 15, true, PDF_INK);
+    y += 18;
+    pdf.line(pad, y, W - pad, y, 1.5, PDF_INK);
+    y += 12;
+    pdf.text(pad, y, "Packed " + formatDate(shipment.shipDate) + " - " + shipment.hub.name, 8, false, PDF_MUTED);
+    y += 16;
+
+    pdf.text(pad, y, "FROM", 6.5, true, PDF_MUTED);
+    y += 10;
+    var fromLines = pdf.textWrapped(pad, y, contentW, shipment.hub.name + " - " + shipment.hub.address + (shipment.hub.phone ? " - " + shipment.hub.phone : ""), 8, false, 10, [0.2, 0.2, 0.2]);
+    y += fromLines * 10 + 10;
+
+    pdf.text(pad, y, "DELIVER TO WAREHOUSE", 6.5, true, PDF_MUTED);
+    y += 12;
+    var boxTop = y - 4;
+    pdf.text(pad + 8, y + 8, shipment.vendor.name + (shipment.vendor.warehouseLabel ? " - " + shipment.vendor.warehouseLabel : ""), 11, true, PDF_INK);
+    y += 20;
+    var addrLines = pdf.textWrapped(pad + 8, y, contentW - 16, shipment.vendor.address + (shipment.vendor.contactPhone ? " - Attn: " + (shipment.vendor.contactName || "Inbound Receiving") + " - " + shipment.vendor.contactPhone : ""), 9, false, 11, [0.2, 0.2, 0.2]);
+    y += addrLines * 11 + 8;
+    pdf.rect(pad, boxTop, contentW, y - boxTop, "stroke", PDF_INK, null, 1.2);
+    y += 16;
+
+    var boxQty = box.rows.reduce(function (s, r) { return s + (r.qty || 0); }, 0);
+    pdf.text(pad, y, "CONTENTS - THIS BOX", 6.5, true, PDF_MUTED);
+    y += 24;
+    pdf.text(pad, y, String(boxQty), 26, true, PDF_INK);
+    pdf.text(pad + 44, y - 3, "unit" + (boxQty === 1 ? "" : "s") + " - " + box.rows.length + " return line" + (box.rows.length === 1 ? "" : "s"), 8, false, [0.3, 0.3, 0.3]);
+    y += 16;
+    pdf.text(pad, y, "Tracking detail is on the invoice packed with this shipment", 6.8, false, PDF_MUTED);
+
+    var footY = H - pad - 22;
+    pdf.dashedLine(pad, footY, W - pad, footY, 1, [0.69, 0.69, 0.69], 3);
+    pdf.text(pad, footY + 12, "Keep dry - No stacking", 6.5, true, [0.3, 0.3, 0.3]);
+    pdf.text(pad, footY + 22, "Sign & return the invoice packed with this shipment", 6.3, false, PDF_MUTED);
+  }
+
+  function drawInvoicePdfPages(pdf, shipment, copyType) {
+    var W = 595.28, H = 841.89, pad = 42, contentW = W - pad * 2;
+    var isVendor = copyType === "vendor";
+    var badgeText = isVendor ? "VENDOR COPY" : "TRANSPORTER COPY";
+    var signLabel = isVendor ? "Received by - vendor warehouse" : "Handed over to - transporter";
+    var totals = shipmentTotals(shipment);
+    var grandTotal = shipment.manifest.reduce(function (s, r) { return s + (r.mrp || 0) * (r.qty || 0); }, 0);
+
+    pdf.newPage(W, H);
+    var y = pad;
+    pdf.textRight(W - pad, y, badgeText, 10, true, PDF_ACCENT);
+    pdf.text(pad, y + 6, "ZILO REVERSE LOGISTICS", 9, true, PDF_MUTED);
+    y += 18;
+    pdf.text(pad, y + 14, "Return Delivery Invoice", 20, true, PDF_INK);
+    pdf.textRight(W - pad, y, "Invoice No. " + shipment.invoiceNo, 9.5, false, [0.3, 0.3, 0.3]);
+    pdf.textRight(W - pad, y + 13, "Date " + formatDate(shipment.shipDate), 9.5, false, [0.3, 0.3, 0.3]);
+    y += 28;
+    pdf.line(pad, y, W - pad, y, 2, PDF_INK);
+    y += 22;
+
+    var boxTop = y - 10;
+    pdf.text(pad + 10, y + 2, "FROM", 7, true, PDF_MUTED);
+    var fromLines = pdf.textWrapped(pad + 70, y + 2, contentW - 90, shipment.hub.name + " - " + shipment.hub.address, 10, false, 12, PDF_INK);
+    y += fromLines * 12 + 6;
+    pdf.text(pad + 10, y + 2, "TO", 7, true, PDF_MUTED);
+    var toLines = pdf.textWrapped(pad + 70, y + 2, contentW - 90, shipment.vendor.name + (shipment.vendor.warehouseLabel ? " - " + shipment.vendor.warehouseLabel : "") + " - " + shipment.vendor.address, 10, false, 12, PDF_INK);
+    y += toLines * 12 + 6;
+    pdf.text(pad + 10, y + 2, "PACKAGES", 7, true, PDF_MUTED);
+    pdf.text(pad + 70, y + 2, totals.boxes + " box" + (totals.boxes === 1 ? "" : "es") + " - " + totals.returns + " returns - " + totals.units + " units", 10, false, PDF_INK);
+    y += 18;
+    pdf.rect(pad, boxTop, contentW, y - boxTop, "stroke", PDF_INK, null, 1.2);
+    y += 24;
+
+    var courTop = y - 8;
+    pdf.text(pad + 10, y + 4, "COURIER DETAILS - TO BE FILLED IN AT HANDOVER", 7.5, true, PDF_ACCENT);
+    y += 18;
+    pdf.text(pad + 10, y, "Courier:", 9.5, false, PDF_INK);
+    pdf.line(pad + 70, y + 2, W - pad - 10, y + 2, 0.7, [0.76, 0.76, 0.76]);
+    y += 18;
+    pdf.text(pad + 10, y, "AWB / Tracking No.:", 9.5, false, PDF_INK);
+    pdf.line(pad + 116, y + 2, W - pad - 10, y + 2, 0.7, [0.76, 0.76, 0.76]);
+    y += 14;
+    pdf.rect(pad, courTop, contentW, y - courTop, "stroke", PDF_ACCENT, null, 1.2);
+    y += 26;
+
+    // Size the Tracking column to fit the longest actual tracking value (instead of a
+    // fixed proportion) so IDs never get ellipsis-truncated.
+    var trackingFontSize = 8.5;
+    var maxTrackingTextWidth = shipment.manifest.reduce(function (max, r) {
+      return Math.max(max, pdfTextWidth(pdfSafe(r.tracking), trackingFontSize, false));
+    }, pdfTextWidth("TRACKING", 7.5, true));
+    var mrpW = 0.20, qtyW = 0.16, boxW = 0.16, totalW = 0.22;
+    var trackingW = Math.max(1 - mrpW - qtyW - boxW - totalW, (maxTrackingTextWidth + 12) / contentW);
+
+    var cols = [
+      { key: "tracking", label: "TRACKING", w: trackingW, align: "left" },
+      { key: "mrp", label: "VALUE", w: mrpW, align: "right" },
+      { key: "qty", label: "QTY", w: qtyW, align: "right" },
+      { key: "boxNo", label: "BOX", w: boxW, align: "right" },
+      { key: "total", label: "TOTAL", w: totalW, align: "right" },
+    ];
+    var colX = [], cx = pad;
+    cols.forEach(function (c) { colX.push(cx); cx += contentW * c.w; });
+
+    function drawTableHeader() {
+      cols.forEach(function (c, i) {
+        var xw = contentW * c.w;
+        if (c.align === "right") pdf.textRight(colX[i] + xw - 4, y + 9, c.label, 7.5, true, PDF_MUTED);
+        else pdf.text(colX[i] + 2, y + 9, c.label, 7.5, true, PDF_MUTED);
+      });
+      y += 12;
+      pdf.line(pad, y, W - pad, y, 1.2, PDF_INK);
+      y += 10;
+    }
+    drawTableHeader();
+
+    var rowH = 15;
+    shipment.manifest.forEach(function (r) {
+      if (y + rowH > H - pad - 30) {
+        pdf.newPage(W, H);
+        y = pad;
+        pdf.text(pad, y + 10, "Return Delivery Invoice (continued) - " + shipment.invoiceNo, 11, true, PDF_INK);
+        y += 24;
+        drawTableHeader();
+      }
+      var total = (r.mrp || 0) * (r.qty || 0);
+      var vals = [
+        pdfTruncate(r.tracking, contentW * cols[0].w - 6, 8.5),
+        formatMoneyPdf(r.mrp), String(r.qty), String(r.boxNo), formatMoneyPdf(total),
+      ];
+      cols.forEach(function (c, i) {
+        var xw = contentW * c.w;
+        if (c.align === "right") pdf.textRight(colX[i] + xw - 4, y + 9, vals[i], 8.5, false, [0.2, 0.2, 0.2]);
+        else pdf.text(colX[i] + 2, y + 9, vals[i], 8.5, false, [0.2, 0.2, 0.2]);
+      });
+      y += rowH;
+      pdf.line(pad, y - 3, W - pad, y - 3, 0.5, [0.9, 0.9, 0.9]);
+    });
+
+    if (y + 90 > H - pad) { pdf.newPage(W, H); y = pad; }
+    y += 6;
+    pdf.line(pad, y, W - pad, y, 1.5, PDF_INK);
+    y += 16;
+    pdf.text(pad, y, "GRAND TOTAL", 9, true, PDF_INK);
+    pdf.textRight(W - pad, y, formatMoneyPdf(grandTotal), 12, true, PDF_INK);
+    y += 32;
+
+    pdf.line(pad, y, W - pad, y, 1.2, PDF_INK);
+    y += 16;
+    pdf.text(pad, y, signLabel + " - name & signature:", 9, false, PDF_MUTED);
+    pdf.line(pad + 220, y + 2, W - pad, y + 2, 0.7, [0.76, 0.76, 0.76]);
+    y += 20;
+    pdf.text(pad, y, "Date / time:", 9, false, PDF_MUTED);
+    pdf.line(pad + 90, y + 2, W - pad, y + 2, 0.7, [0.76, 0.76, 0.76]);
+    y += 22;
+
+    pdf.line(pad, y, W - pad, y, 0.7, [0.7, 0.7, 0.7]);
+    y += 12;
+    pdf.textWrapped(pad, y, contentW, "Delivery document for movement of returned goods to vendor warehouse - not a GST tax invoice. Retain this copy as the " + (isVendor ? "vendor's" : "transporter's") + " record of handover.", 7.5, false, 9, PDF_MUTED);
+  }
+
+  function slugify(s) {
+    return String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  }
+
+  function downloadBrandPdf(shipment) {
+    var pdf = createPdfDoc();
+    var boxes = shipmentBoxes(shipment);
+    boxes.forEach(function (box, i) { drawLabelPdfPage(pdf, shipment, box, i + 1, boxes.length); });
+    drawInvoicePdfPages(pdf, shipment, "vendor");
+    drawInvoicePdfPages(pdf, shipment, "transporter");
+
+    var pdfString = pdf.build();
+    var bytes = new Uint8Array(pdfString.length);
+    for (var i = 0; i < pdfString.length; i++) bytes[i] = pdfString.charCodeAt(i) & 0xFF;
+    var blob = new Blob([bytes], { type: "application/pdf" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = shipment.invoiceNo + "-" + slugify(shipment.vendor.name) + ".pdf";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+
+  // ================= Excel (.xlsx) export (no external library) =================
+  // A .xlsx is a ZIP of XML parts. We only need the "stored" (uncompressed) ZIP
+  // method, which needs no compression algorithm — just correct headers + CRC32.
+  var CRC32_TABLE = (function () {
+    var table = new Array(256);
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      table[n] = c >>> 0;
+    }
+    return table;
+  })();
+  function crc32(bytes) {
+    var crc = 0xFFFFFFFF;
+    for (var i = 0; i < bytes.length; i++) crc = CRC32_TABLE[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+  function bytesToBinStr(bytes) {
+    var s = "";
+    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return s;
+  }
+  function u16le(n) { return String.fromCharCode(n & 0xFF, (n >> 8) & 0xFF); }
+  function u32le(n) { return String.fromCharCode(n & 0xFF, (n >> 8) & 0xFF, (n >> 16) & 0xFF, (n >>> 24) & 0xFF); }
+
+  function createZip() {
+    var files = [];
+    function addFile(name, textContent) { files.push({ name: name, bytes: new TextEncoder().encode(textContent) }); }
+    function build() {
+      var localParts = [], centralParts = [], offset = 0;
+      files.forEach(function (f) {
+        var nameStr = f.name;
+        var crc = crc32(f.bytes);
+        var size = f.bytes.length;
+        var localHeader = "PK\x03\x04" + u16le(20) + u16le(0) + u16le(0) + u16le(0) + u16le(0) +
+          u32le(crc) + u32le(size) + u32le(size) + u16le(nameStr.length) + u16le(0) + nameStr;
+        var dataStr = bytesToBinStr(f.bytes);
+        localParts.push(localHeader + dataStr);
+        var centralHeader = "PK\x01\x02" + u16le(20) + u16le(20) + u16le(0) + u16le(0) + u16le(0) + u16le(0) +
+          u32le(crc) + u32le(size) + u32le(size) + u16le(nameStr.length) + u16le(0) + u16le(0) + u16le(0) + u16le(0) + u32le(0) + u32le(offset) + nameStr;
+        centralParts.push(centralHeader);
+        offset += localHeader.length + dataStr.length;
+      });
+      var centralDir = centralParts.join("");
+      var eocd = "PK\x05\x06" + u16le(0) + u16le(0) + u16le(files.length) + u16le(files.length) +
+        u32le(centralDir.length) + u32le(offset) + u16le(0);
+      var binStr = localParts.join("") + centralDir + eocd;
+      var bytes = new Uint8Array(binStr.length);
+      for (var i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i) & 0xFF;
+      return bytes;
+    }
+    return { addFile: addFile, build: build };
+  }
+
+  function xmlEscape(str) {
+    return String(str == null ? "" : str).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; });
+  }
+  function xlsxTextCell(ref, value) {
+    return "<c r=\"" + ref + "\" t=\"inlineStr\"><is><t xml:space=\"preserve\">" + xmlEscape(value) + "</t></is></c>";
+  }
+  function xlsxNumCell(ref, value) {
+    return "<c r=\"" + ref + "\"><v>" + Number(value || 0) + "</v></c>";
+  }
+  function xlsxBoldTextCell(ref, value) {
+    return "<c r=\"" + ref + "\" t=\"inlineStr\" s=\"1\"><is><t xml:space=\"preserve\">" + xmlEscape(value) + "</t></is></c>";
+  }
+  var XLSX_COL_LETTERS = ["A", "B", "C", "D", "E"];
+
+  function buildInvoiceWorksheetXml(shipment) {
+    var totals = shipmentTotals(shipment);
+    var grandTotal = shipment.manifest.reduce(function (s, r) { return s + (r.mrp || 0) * (r.qty || 0); }, 0);
+    var rows = [];
+    var r = 1;
+    function row(cellsXml) { rows.push("<row r=\"" + r + "\">" + cellsXml + "</row>"); r++; }
+
+    row(xlsxBoldTextCell("A1", "Zilo Reverse Logistics — Return Delivery Invoice"));
+    row(xlsxTextCell("A2", "Invoice No.") + xlsxTextCell("B2", shipment.invoiceNo));
+    row(xlsxTextCell("A3", "Date") + xlsxTextCell("B3", formatDate(shipment.shipDate)));
+    row(xlsxTextCell("A4", "From") + xlsxTextCell("B4", shipment.hub.name + " — " + shipment.hub.address));
+    row(xlsxTextCell("A5", "To") + xlsxTextCell("B5", shipment.vendor.name + (shipment.vendor.warehouseLabel ? " — " + shipment.vendor.warehouseLabel : "") + " — " + shipment.vendor.address));
+    row(xlsxTextCell("A6", "Packages") + xlsxTextCell("B6", totals.boxes + " boxes, " + totals.returns + " returns, " + totals.units + " units"));
+    r++; // blank row
+
+    row(["Tracking", "Value", "Qty", "Box", "Total"].map(function (h, i) { return xlsxBoldTextCell(XLSX_COL_LETTERS[i] + r, h); }).join(""));
+    shipment.manifest.forEach(function (item) {
+      var total = (item.mrp || 0) * (item.qty || 0);
+      row(
+        xlsxTextCell("A" + r, item.tracking) +
+        xlsxNumCell("B" + r, item.mrp) +
+        xlsxNumCell("C" + r, item.qty) +
+        xlsxNumCell("D" + r, item.boxNo) +
+        xlsxNumCell("E" + r, total)
+      );
+    });
+    r++; // blank row
+    row(xlsxBoldTextCell("A" + r, "Grand Total") + xlsxBoldTextCell("E" + r, grandTotal));
+
+    return (
+      "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+      "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">" +
+      "<cols><col min=\"1\" max=\"1\" width=\"24\" customWidth=\"1\"/><col min=\"2\" max=\"5\" width=\"12\" customWidth=\"1\"/></cols>" +
+      "<sheetData>" + rows.join("") + "</sheetData>" +
+      "</worksheet>"
+    );
+  }
+
+  function downloadBrandExcel(shipment) {
+    var zip = createZip();
+    zip.addFile("[Content_Types].xml",
+      "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+      "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">" +
+      "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>" +
+      "<Default Extension=\"xml\" ContentType=\"application/xml\"/>" +
+      "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>" +
+      "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>" +
+      "<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>" +
+      "</Types>");
+    zip.addFile("_rels/.rels",
+      "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+      "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
+      "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>" +
+      "</Relationships>");
+    zip.addFile("xl/workbook.xml",
+      "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+      "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">" +
+      "<sheets><sheet name=\"Manifest\" sheetId=\"1\" r:id=\"rId1\"/></sheets>" +
+      "</workbook>");
+    zip.addFile("xl/_rels/workbook.xml.rels",
+      "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+      "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
+      "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>" +
+      "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>" +
+      "</Relationships>");
+    zip.addFile("xl/styles.xml",
+      "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+      "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">" +
+      "<fonts count=\"2\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font><font><sz val=\"11\"/><name val=\"Calibri\"/><b/></font></fonts>" +
+      "<fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills>" +
+      "<borders count=\"1\"><border/></borders>" +
+      "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\"/></cellStyleXfs>" +
+      "<cellXfs count=\"2\"><xf numFmtId=\"0\" fontId=\"0\" xfId=\"0\"/><xf numFmtId=\"0\" fontId=\"1\" xfId=\"0\" applyFont=\"1\"/></cellXfs>" +
+      "</styleSheet>");
+    zip.addFile("xl/worksheets/sheet1.xml", buildInvoiceWorksheetXml(shipment));
+
+    var bytes = zip.build();
+    var blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = shipment.invoiceNo + "-" + slugify(shipment.vendor.name) + ".xlsx";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+
+  // ================= sheet building (shared by single-shipment view + batch view) =================
+  function buildSheets(full) {
+    var boxes = shipmentBoxes(full);
+    var sheets = [];
+    boxes.forEach(function (box, i) {
+      sheets.push({ key: "box" + box.boxNo, label: "Box " + (i + 1) + " of " + boxes.length, html: labelSheetHtml(full, box, i + 1, boxes.length) });
+    });
+    sheets.push({ key: "invoice-vendor", label: "Invoice — Vendor Copy", html: invoiceSheetHtml(full, "vendor") });
+    sheets.push({ key: "invoice-transporter", label: "Invoice — Transporter Copy", html: invoiceSheetHtml(full, "transporter") });
+    return sheets;
+  }
+
+  function renderSheetPicker(containerEl, pickerEl, sheets) {
+    containerEl.innerHTML = "";
+    pickerEl.innerHTML = "";
+    sheets.forEach(function (s, idx) {
+      var wrap = document.createElement("div");
+      wrap.className = "sheet-view" + (idx === 0 ? " is-active print-include" : " print-include");
+      wrap.dataset.key = s.key;
+      wrap.innerHTML = s.html;
+      containerEl.appendChild(wrap);
+
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = s.label;
+      btn.setAttribute("aria-selected", idx === 0 ? "true" : "false");
+      btn.addEventListener("click", function () {
+        pickerEl.querySelectorAll("button").forEach(function (b) { b.setAttribute("aria-selected", "false"); });
+        containerEl.querySelectorAll(".sheet-view").forEach(function (v) { v.classList.remove("is-active"); });
+        btn.setAttribute("aria-selected", "true");
+        wrap.classList.add("is-active");
+      });
+      pickerEl.appendChild(btn);
+    });
+  }
+
+  // ================= print view =================
+  // full: { invoiceNo, shipDate, hub, vendor, manifest } — the shape GET
+  // /api/shipments/:id returns.
+  function openPrintView(full) {
+    var totals = shipmentTotals(full);
+
+    document.getElementById("formView").style.display = "none";
+    document.getElementById("batchView").style.display = "none";
+    document.getElementById("printView").style.display = "block";
+    document.getElementById("challanNo").textContent = full.invoiceNo;
+    document.getElementById("pageTitle").textContent = full.vendor.name + (full.vendor.warehouseLabel ? " — " + full.vendor.warehouseLabel : "");
+    document.getElementById("metaVendor").textContent = full.vendor.name;
+    document.getElementById("metaHub").textContent = "from " + full.hub.name;
+    document.getElementById("metaTotals").textContent = totals.boxes + " box" + (totals.boxes === 1 ? "" : "es") + " · " + totals.returns + " returns · " + totals.units + " units";
+
+    renderSheetPicker(document.getElementById("sheetsContainer"), document.getElementById("sheetPicker"), buildSheets(full));
+  }
+
+  // Each print job is single-sized: labels go to a 4x6 label printer, invoices to
+  // an A4 printer, so we never mix page sizes within one print() call — that's
+  // what was causing labels to print clipped/misaligned.
+  function setPageSize(css) {
+    document.getElementById("dynamicPageSize").textContent = "@page { size: " + css + "; margin: 0; }";
+  }
+  function printSheets(filterFn, pageSize) {
+    var views = document.querySelectorAll("#sheetsContainer .sheet-view");
+    views.forEach(function (v) { v.classList.toggle("print-include", filterFn(v)); });
+    setPageSize(pageSize);
+    window.print();
+    setTimeout(function () {
+      views.forEach(function (v) { v.classList.add("print-include"); });
+    }, 500);
+  }
+  document.getElementById("printLabelsBtn").addEventListener("click", function () {
+    printSheets(function (v) { return v.dataset.key.indexOf("box") === 0; }, "4in 6in");
+  });
+  document.getElementById("printInvoicesBtn").addEventListener("click", function () {
+    printSheets(function (v) { return v.dataset.key.indexOf("invoice") === 0; }, "A4");
+  });
+  document.getElementById("printOneBtn").addEventListener("click", function () {
+    var active = document.querySelector("#sheetsContainer .sheet-view.is-active");
+    var pageSize = active.dataset.key.indexOf("box") === 0 ? "4in 6in" : "A4";
+    printSheets(function (v) { return v.classList.contains("is-active"); }, pageSize);
+  });
+  document.getElementById("backLink").addEventListener("click", function () {
+    document.getElementById("printView").style.display = "none";
+    document.getElementById("formView").style.display = "block";
+    renderRecent();
+  });
+
+  // ================= daily dump import (tracking -> SKU/value master data) =================
+  function parseCsv(text) {
+    var rows = [];
+    var i = 0, field = "", row = [], inQuotes = false;
+    var n = text.length;
+    while (i < n) {
+      var c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
+          inQuotes = false; i++; continue;
+        }
+        field += c; i++; continue;
+      } else {
+        if (c === '"') { inQuotes = true; i++; continue; }
+        if (c === ",") { row.push(field); field = ""; i++; continue; }
+        if (c === "\r") { i++; continue; }
+        if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; i++; continue; }
+        field += c; i++; continue;
+      }
+    }
+    if (field.length || row.length) { row.push(field); rows.push(row); }
+    return rows.filter(function (r) { return r.some(function (c) { return c.trim() !== ""; }); });
+  }
+
+  var DUMP_HEADER_ALIASES = {
+    trackingId: ["trackingid"],
+    marketplaceOrderId: ["marketplaceorderid"],
+    returnId: ["returnid"],
+    sellerName: ["sellername", "seller", "brand"],
+    rtvShipmentId: ["rtvshipmentid"],
+    tmsProviderName: ["tmsprovidername", "tmsprovider"],
+    rtvShipmentStatus: ["rtvshipmentstatus"],
+    rtvCreatedAt: ["rtvcreatedat"],
+    rtvTrackingId: ["rtvtrackingid"],
+    value: ["value", "mrp"],
+    orderSetId: ["ordersetid"],
+  };
+  function normalizeHeader(s) {
+    return String(s || "").trim().toLowerCase().replace(/[^a-z0-9#]/g, "");
+  }
+
+  function handleDumpCsvText(text) {
+    var errEl = document.getElementById("dumpError");
+    errEl.textContent = "";
+    var rows;
+    try { rows = parseCsv(text); } catch (err) { errEl.textContent = "Couldn't read that CSV: " + err.message; return; }
+    if (rows.length < 2) { errEl.textContent = "CSV has no data rows"; return; }
+
+    var header = rows[0].map(normalizeHeader);
+    var colIndex = {};
+    Object.keys(DUMP_HEADER_ALIASES).forEach(function (key) {
+      var aliases = DUMP_HEADER_ALIASES[key];
+      var idx = header.findIndex(function (h) { return aliases.indexOf(h) !== -1; });
+      if (idx !== -1) colIndex[key] = idx;
+    });
+    var required = ["trackingId", "value"];
+    var missing = required.filter(function (k) { return colIndex[k] === undefined; });
+    if (missing.length) { errEl.textContent = "CSV is missing required column(s): " + missing.join(", "); return; }
+
+    function col(r, key) { return colIndex[key] !== undefined ? (r[colIndex[key]] || "").trim() : ""; }
+
+    var dumpRows = [];
+    rows.slice(1).forEach(function (r) {
+      var trackingId = col(r, "trackingId");
+      if (!trackingId) return;
+      var value = parseMoneyLoose(r[colIndex.value]);
+      dumpRows.push({
+        trackingId: trackingId,
+        marketplaceOrderId: col(r, "marketplaceOrderId"),
+        returnId: col(r, "returnId"),
+        sellerName: col(r, "sellerName"),
+        rtvShipmentId: col(r, "rtvShipmentId"),
+        tmsProviderName: col(r, "tmsProviderName"),
+        rtvShipmentStatus: col(r, "rtvShipmentStatus"),
+        rtvCreatedAt: col(r, "rtvCreatedAt"),
+        rtvTrackingId: col(r, "rtvTrackingId"),
+        value: isNaN(value) || value < 0 ? 0 : value,
+        orderSetId: col(r, "orderSetId"),
+      });
+    });
+    if (dumpRows.length === 0) { errEl.textContent = "No valid rows found — check Tracking ID and Value are filled in"; return; }
+
+    postJson("/api/dump/import", { rows: dumpRows })
+      .then(function (result) {
+        toast("Dump imported: " + result.inserted + " new, " + result.updated + " updated (" + result.total + " total).");
+        document.getElementById("dumpFileInput").value = "";
+      })
+      .catch(function (err) { errEl.textContent = "Import failed: " + err.message; });
+  }
+
+  document.getElementById("dumpFileInput").addEventListener("change", function (e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () { handleDumpCsvText(String(reader.result)); };
+    reader.onerror = function () { document.getElementById("dumpError").textContent = "Couldn't read that file"; };
+    reader.readAsText(file);
+  });
+
+  document.getElementById("downloadSampleDumpCsv").addEventListener("click", function () {
+    var sample =
+      "Tracking ID,Marketplace Order ID,Return ID,Seller name,RTV Shipment ID,TMS Provider name,RTV Shipment Status,RTV Created At,RTV tracking id,Value,Order set ID\n" +
+      "TRK-0001,MKT-55001,RET-9001,Arrow,RTVSHP-001,Delhivery,CREATED,2026-08-18T09:00:00Z,,1299,ORDSET-01\n" +
+      "TRK-0002,MKT-55002,RET-9002,Arrow,RTVSHP-001,Delhivery,CREATED,2026-08-18T09:00:00Z,,1899,ORDSET-01\n" +
+      "TRK-1001,MKT-55010,RET-9010,Rare Rabbit,RTVSHP-002,Xpressbees,CREATED,2026-08-18T09:05:00Z,,1999,ORDSET-02\n";
+    var blob = new Blob([sample], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "rtv-dump-sample.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  });
+
+  // ================= scan to pack =================
+  var currentBox = []; // items in the box currently being packed
+  var boxNo = 1;
+  var closedBoxes = []; // [{ boxNo, items }]
+  var scannedTrackingIds = new Set(); // guards against re-scanning the same tracking ID twice this session
+  var pendingScan = null; // item awaiting the pending-item form (tracking not found in the database)
+  var currentVendor = null; // brand/warehouse chosen for the box currently being packed
+
+  function boxQty(items) { return items.reduce(function (sum, it) { return sum + it.qty; }, 0); }
+  function boxAmount(items) { return items.reduce(function (sum, it) { return sum + it.mrp * it.qty; }, 0); }
+
+  function renderCurrentBox() {
+    document.getElementById("boxNumStat").textContent = String(boxNo);
+    document.getElementById("boxQtyStat").textContent = String(boxQty(currentBox));
+    document.getElementById("boxAmountStat").textContent = formatMoney(boxAmount(currentBox));
+    var body = document.getElementById("boxBody");
+    body.innerHTML = "";
+    document.getElementById("boxEmpty").style.display = currentBox.length ? "none" : "block";
+    // Brand is locked in once the box has items — switching mid-box would silently
+    // mislabel already-scanned rows, so require closing the box first.
+    document.getElementById("boxVendorSelect").disabled = currentBox.length > 0;
+    document.getElementById("toggleNewBrand").disabled = currentBox.length > 0;
+    currentBox.forEach(function (it, idx) {
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td class='mono'>" + escapeHtml(it.tracking) + "</td>" +
+        "<td>" + escapeHtml(it.vendorName) + "</td>" +
+        "<td class='num-col mono'>" + formatMoney(it.mrp) + "</td>" +
+        "<td class='num-col mono'>" + it.qty + "</td>" +
+        "<td class='num-col mono'>" + formatMoney(it.mrp * it.qty) + "</td>" +
+        "<td></td>";
+      var delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "row-del";
+      delBtn.title = "Remove";
+      delBtn.textContent = "✕";
+      delBtn.addEventListener("click", function () {
+        scannedTrackingIds.delete(it.tracking);
+        currentBox.splice(idx, 1);
+        renderCurrentBox();
+        renderClosedBoxes();
+      });
+      tr.lastElementChild.appendChild(delBtn);
+      body.appendChild(tr);
+    });
+  }
+
+  function renderClosedBoxes() {
+    var body = document.getElementById("closedBoxesBody");
+    body.innerHTML = "";
+    document.getElementById("closedBoxesEmpty").style.display = closedBoxes.length ? "none" : "block";
+    var totalQty = 0, totalAmount = 0;
+    closedBoxes.forEach(function (box, idx) {
+      var qty = boxQty(box.items), amount = boxAmount(box.items);
+      totalQty += qty; totalAmount += amount;
+      var brands = Array.from(new Set(box.items.map(function (it) { return it.vendorName; })));
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td>Box " + box.boxNo + "</td>" +
+        "<td>" + escapeHtml(brands.join(", ")) + "</td>" +
+        "<td>" + box.items.length + "</td>" +
+        "<td class='num-col mono'>" + qty + "</td>" +
+        "<td class='num-col mono'>" + formatMoney(amount) + "</td>" +
+        "<td></td>";
+      var delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "row-del";
+      delBtn.title = "Remove this closed box";
+      delBtn.textContent = "✕";
+      delBtn.addEventListener("click", function () {
+        box.items.forEach(function (it) { scannedTrackingIds.delete(it.tracking); });
+        closedBoxes.splice(idx, 1);
+        renderClosedBoxes();
+      });
+      tr.lastElementChild.appendChild(delBtn);
+      body.appendChild(tr);
+    });
+    document.getElementById("sessionBoxesStat").textContent = String(closedBoxes.length);
+    document.getElementById("sessionQtyStat").textContent = String(totalQty);
+    document.getElementById("sessionAmountStat").textContent = formatMoney(totalAmount);
+    document.getElementById("finishShipmentBtn").disabled = closedBoxes.length === 0 && currentBox.length === 0;
+  }
+
+  function addItemToBox(item, vendor) {
+    currentBox.push({
+      tracking: item.tracking, vendorId: vendor.id, vendorName: vendor.name,
+      mrp: item.value, qty: item.qty,
+    });
+    scannedTrackingIds.add(item.tracking);
+    renderCurrentBox();
+    renderClosedBoxes();
+    toast("Added " + item.tracking + " — " + formatMoney(item.value));
+  }
+
+  document.getElementById("closeBoxBtn").addEventListener("click", function () {
+    if (currentBox.length === 0) { toast("Nothing scanned into this box yet", true); return; }
+    closedBoxes.push({ boxNo: boxNo, items: currentBox });
+    currentBox = [];
+    boxNo++;
+    renderCurrentBox();
+    renderClosedBoxes();
+    toast("Box closed. Starting box " + boxNo + ".");
+  });
+
+  // ---- brand for the box: chosen once, up front, before any scanning ----
+  function refreshBoxVendorSelect() {
+    var select = document.getElementById("boxVendorSelect");
+    var current = select.value;
+    select.innerHTML = "";
+    var placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "— Select brand —";
+    select.appendChild(placeholder);
+    state.vendors.slice().sort(function (a, b) { return a.name.localeCompare(b.name); }).forEach(function (v) {
+      var opt = document.createElement("option");
+      opt.value = String(v.id);
+      opt.textContent = vendorLabel(v);
+      select.appendChild(opt);
+    });
+    if (current) select.value = current;
+  }
+
+  function applyBoxVendorSelection() {
+    var id = document.getElementById("boxVendorSelect").value;
+    currentVendor = id ? state.vendors.find(function (v) { return String(v.id) === id; }) : null;
+    var scanInputEl = document.getElementById("scanInput");
+    scanInputEl.disabled = !currentVendor;
+    scanInputEl.placeholder = currentVendor ? "Scan or type tracking ID, then Enter" : "Select a brand above first";
+    if (currentVendor) scanInputEl.focus();
+  }
+
+  document.getElementById("boxVendorSelect").addEventListener("change", applyBoxVendorSelection);
+
+  wireToggle("toggleNewBrand", "newBrandForm");
+  document.getElementById("cancelBrand").addEventListener("click", function () {
+    document.getElementById("newBrandForm").classList.remove("is-open");
+  });
+  document.getElementById("saveBrand").addEventListener("click", function () {
+    var name = document.getElementById("nb-name").value.trim();
+    var address = document.getElementById("nb-address").value.trim();
+    if (!name || !address) { toast("Brand name and address are required", true); return; }
+    postJson("/api/vendors", {
+      name: name, address: address,
+      shortName: document.getElementById("nb-shortName").value.trim(),
+      contactPhone: document.getElementById("nb-contactPhone").value.trim(),
+    }).then(function (vendor) {
+      state.vendors.push(vendor);
+      refreshBoxVendorSelect();
+      document.getElementById("boxVendorSelect").value = vendor.id;
+      applyBoxVendorSelection();
+      document.getElementById("newBrandForm").classList.remove("is-open");
+      ["nb-name", "nb-shortName", "nb-address", "nb-contactPhone"].forEach(function (id) { document.getElementById(id).value = ""; });
+      toast("Brand saved: " + vendor.name);
+    }).catch(function (err) { toast("Couldn't save brand: " + err.message, true); });
+  });
+
+  // ---- pending item form: only needed when a scanned tracking ID isn't in
+  // the database yet — brand/warehouse is already fixed for the box ----
+  function openPendingItemForm(item) {
+    pendingScan = item;
+    document.getElementById("pi-tracking").value = item.tracking;
+    document.getElementById("pi-value").value = item.value || "";
+    document.getElementById("pi-qty").value = item.qty || 1;
+    document.getElementById("pendingItemForm").classList.add("is-open");
+    document.getElementById("pi-value").focus();
+  }
+
+  function closePendingItemForm() {
+    pendingScan = null;
+    document.getElementById("pendingItemForm").classList.remove("is-open");
+    document.getElementById("scanInput").focus();
+  }
+
+  document.getElementById("pi-cancel").addEventListener("click", closePendingItemForm);
+
+  document.getElementById("pi-add").addEventListener("click", function () {
+    if (!pendingScan) return;
+    var value = parseMoneyLoose(document.getElementById("pi-value").value);
+    var qty = parseInt(document.getElementById("pi-qty").value, 10);
+    if (isNaN(value) || value < 0) { toast("Value is required", true); return; }
+    if (isNaN(qty) || qty < 1) { toast("Qty must be at least 1", true); return; }
+    addItemToBox({ tracking: pendingScan.tracking, value: value, qty: qty }, currentVendor);
+    closePendingItemForm();
+  });
+
+  var scanInputEl = document.getElementById("scanInput");
+  scanInputEl.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (!currentVendor) { toast("Select a brand for this box first", true); return; }
+    var tracking = scanInputEl.value.trim();
+    scanInputEl.value = "";
+    if (!tracking) return;
+    document.getElementById("scanError").textContent = "";
+    if (scannedTrackingIds.has(tracking)) {
+      toast(tracking + " was already scanned into this session", true);
+      return;
+    }
+    getJson("/api/lookup?tracking=" + encodeURIComponent(tracking))
+      .then(function (found) {
+        // Found in the database — value is known, brand is already fixed for
+        // this box, so it goes straight in with no extra step.
+        addItemToBox({ tracking: tracking, value: found.value, qty: 1 }, currentVendor);
+        scanInputEl.focus();
+      })
+      .catch(function () {
+        // Not in the database — fall back to manual entry for this tracking ID.
+        openPendingItemForm({ tracking: tracking, value: 0, qty: 1 });
+      });
+  });
+
+  document.getElementById("finishShipmentBtn").addEventListener("click", function () {
+    var hubId = document.getElementById("hubSelect").value;
+    var shipDate = document.getElementById("shipDateInput").value;
+    var scanErrEl = document.getElementById("scanError");
+    scanErrEl.textContent = "";
+    if (!hubId) { scanErrEl.textContent = "Pick or add a hub above first."; return; }
+    if (!shipDate) { scanErrEl.textContent = "Ship date is required."; return; }
+
+    if (currentBox.length) {
+      closedBoxes.push({ boxNo: boxNo, items: currentBox });
+      currentBox = [];
+      boxNo++;
+    }
+    if (closedBoxes.length === 0) { scanErrEl.textContent = "Scan and close at least one box first."; return; }
+
+    var hub = state.hubs.find(function (h) { return String(h.id) === String(hubId); });
+    var byVendor = {}; // vendorId -> { vendor, items }
+    closedBoxes.forEach(function (box) {
+      box.items.forEach(function (it) {
+        if (!byVendor[it.vendorId]) byVendor[it.vendorId] = { vendor: { id: it.vendorId, name: it.vendorName }, items: [] };
+        byVendor[it.vendorId].items.push({ tracking: it.tracking, mrp: it.mrp, qty: it.qty, boxNo: box.boxNo });
+      });
+    });
+
+    var finishBtn = document.getElementById("finishShipmentBtn");
+    finishBtn.disabled = true;
+    var vendorGroups = Object.keys(byVendor).map(function (id) { return byVendor[id]; });
+    Promise.all(vendorGroups.map(function (group) {
+      return postJson("/api/shipments", { hubId: Number(hubId), vendorId: Number(group.vendor.id), shipDate: shipDate, items: group.items })
+        .then(function (created) {
+          var vendor = state.vendors.find(function (v) { return v.id === group.vendor.id; }) || group.vendor;
+          return { shipment: { invoiceNo: created.invoiceNo, shipDate: shipDate, manifest: group.items }, hub: hub, vendor: vendor };
+        });
+    })).then(function (entries) {
+      toast("Created " + entries.length + " shipment" + (entries.length === 1 ? "" : "s"));
+      currentBox = []; closedBoxes = []; boxNo = 1; scannedTrackingIds = new Set();
+      renderCurrentBox(); renderClosedBoxes();
+      renderRecent();
+      openBatchView(entries);
+    }).catch(function (err) {
+      scanErrEl.textContent = "Couldn't create shipment(s): " + err.message;
+    }).finally(function () {
+      finishBtn.disabled = closedBoxes.length === 0 && currentBox.length === 0;
+    });
+  });
+
+  // ================= batch view (brand-wise tabs) =================
+  function openBatchView(entries) {
+    document.getElementById("formView").style.display = "none";
+    document.getElementById("printView").style.display = "none";
+    document.getElementById("batchView").style.display = "block";
+
+    var tabsEl = document.getElementById("brandTabs");
+    var panelsEl = document.getElementById("brandPanels");
+    tabsEl.innerHTML = "";
+    panelsEl.innerHTML = "";
+
+    document.getElementById("batchTitle").textContent =
+      entries.length + " brand" + (entries.length === 1 ? "" : "s") + " · " + formatDate(entries[0].shipment.shipDate);
+
+    entries.forEach(function (entry, idx) {
+      var full = { invoiceNo: entry.shipment.invoiceNo, shipDate: entry.shipment.shipDate, hub: entry.hub, vendor: entry.vendor, manifest: entry.shipment.manifest };
+      var totals = shipmentTotals(full);
+      var grandTotal = full.manifest.reduce(function (sum, r) { return sum + (r.mrp || 0) * (r.qty || 0); }, 0);
+      var sheets = buildSheets(full);
+
+      var panel = document.createElement("div");
+      panel.className = "brand-panel" + (idx === 0 ? " is-active" : "");
+
+      var head = document.createElement("div");
+      head.className = "brand-panel-head";
+      var headInfo = document.createElement("div");
+      headInfo.innerHTML =
+        "<b>" + escapeHtml(entry.vendor.name) + (entry.vendor.warehouseLabel ? " — " + escapeHtml(entry.vendor.warehouseLabel) : "") + "</b>" +
+        "<div class='meta'>" + escapeHtml(full.invoiceNo) + " · " + totals.boxes + " box" + (totals.boxes === 1 ? "" : "es") +
+        " · " + totals.returns + " items · " + formatMoney(grandTotal) + "</div>";
+      var dlActions = document.createElement("div");
+      dlActions.style.display = "flex";
+      dlActions.style.gap = "8px";
+      var dlXlsBtn = document.createElement("button");
+      dlXlsBtn.type = "button";
+      dlXlsBtn.className = "btn secondary";
+      dlXlsBtn.textContent = "Download Excel";
+      dlXlsBtn.addEventListener("click", function () { downloadBrandExcel(full); });
+      var dlBtn = document.createElement("button");
+      dlBtn.type = "button";
+      dlBtn.className = "btn";
+      dlBtn.textContent = "Download PDF";
+      dlBtn.addEventListener("click", function () { downloadBrandPdf(full); });
+      dlActions.appendChild(dlXlsBtn);
+      dlActions.appendChild(dlBtn);
+      head.appendChild(headInfo);
+      head.appendChild(dlActions);
+      panel.appendChild(head);
+
+      var stageEl = document.createElement("div");
+      stageEl.className = "stage";
+      var localPicker = document.createElement("div");
+      localPicker.className = "sheet-picker";
+      var localContainer = document.createElement("div");
+      stageEl.appendChild(localPicker);
+      stageEl.appendChild(localContainer);
+      panel.appendChild(stageEl);
+      renderSheetPicker(localContainer, localPicker, sheets);
+
+      panelsEl.appendChild(panel);
+
+      var tabBtn = document.createElement("button");
+      tabBtn.type = "button";
+      tabBtn.textContent = entry.vendor.name + (entry.vendor.warehouseLabel ? " — " + entry.vendor.warehouseLabel : "");
+      tabBtn.setAttribute("aria-selected", idx === 0 ? "true" : "false");
+      tabBtn.addEventListener("click", function () {
+        tabsEl.querySelectorAll("button").forEach(function (b) { b.setAttribute("aria-selected", "false"); });
+        panelsEl.querySelectorAll(".brand-panel").forEach(function (p) { p.classList.remove("is-active"); });
+        tabBtn.setAttribute("aria-selected", "true");
+        panel.classList.add("is-active");
+      });
+      tabsEl.appendChild(tabBtn);
+    });
+  }
+
+  document.getElementById("batchBackLink").addEventListener("click", function () {
+    document.getElementById("batchView").style.display = "none";
+    document.getElementById("formView").style.display = "block";
+    renderRecent();
+  });
+
+  // ================= recent shipments =================
+  // Fetched fresh from the central database each time — hub/vendor names and
+  // totals are already denormalized server-side, so no local lookup needed.
+  function renderRecent() {
+    return getJson("/api/shipments").then(function (shipments) {
+      var body = document.getElementById("recentBody");
+      body.innerHTML = "";
+      document.getElementById("recentEmpty").style.display = shipments.length ? "none" : "block";
+      shipments.forEach(function (s) {
+        var tr = document.createElement("tr");
+        var td0 = document.createElement("td");
+        var link = document.createElement("button");
+        link.type = "button";
+        link.className = "recent-row-link mono";
+        link.textContent = s.invoiceNo;
+        link.addEventListener("click", function () {
+          getJson("/api/shipments/" + s.id)
+            .then(function (full) { openPrintView(full); })
+            .catch(function (err) { toast("Couldn't open shipment: " + err.message, true); });
+        });
+        td0.appendChild(link);
+        tr.appendChild(td0);
+        tr.insertAdjacentHTML("beforeend",
+          "<td>" + escapeHtml(s.shipDate) + "</td>" +
+          "<td>" + escapeHtml(s.hubName) + "</td>" +
+          "<td>" + escapeHtml(s.vendorName) + (s.warehouseLabel ? " — " + escapeHtml(s.warehouseLabel) : "") + "</td>" +
+          "<td>" + s.boxes + "</td>" +
+          "<td>" + s.units + "</td>" +
+          "<td class='mono'>" + formatMoney(s.amount) + "</td>"
+        );
+        body.appendChild(tr);
+      });
+    }).catch(function (err) { toast("Couldn't load shipments: " + err.message, true); });
+  }
+
+  // ================= init =================
+  function initApp() {
+    document.getElementById("shipDateInput").value = new Date().toISOString().slice(0, 10);
+    boxNo = 1;
+    renderCurrentBox();
+    renderClosedBoxes();
+    Promise.all([getJson("/api/hubs"), getJson("/api/vendors")])
+      .then(function (results) {
+        state.hubs = results[0];
+        state.vendors = results[1];
+        refreshHubSelect();
+        refreshBoxVendorSelect();
+        renderRecent();
+      })
+      .catch(function (err) {
+        toast("Couldn't reach the server: " + err.message, true);
+      });
+  }
+  initApp();
+})();
+</script>
+</body>
+</html>

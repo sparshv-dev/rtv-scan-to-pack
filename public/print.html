@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Print — RTV Shipment</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="app-shell" id="loadingState">
+  <p class="eyebrow">Return to Vendor</p>
+  <h1>Loading shipment…</h1>
+</div>
+
+<div class="app-shell" id="errorState" style="display:none;">
+  <p class="eyebrow">Return to Vendor</p>
+  <h1>Shipment not found</h1>
+  <p class="hint"><a href="/index.html">Back to shipment desk</a></p>
+</div>
+
+<div class="app-shell" id="printShell" style="display:none;">
+  <div class="app-head no-print">
+    <div>
+      <p class="eyebrow">Return to Vendor · <span id="challanNo" class="mono"></span></p>
+      <h1 id="pageTitle">Print shipment</h1>
+    </div>
+    <a href="/index.html" class="link-btn">&larr; Back</a>
+  </div>
+
+  <div class="print-toolbar no-print">
+    <div class="meta">
+      <b id="metaVendor"></b> · <span id="metaHub"></span> · <span id="metaTotals"></span>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button type="button" class="btn secondary" id="printOneBtn">Print this sheet</button>
+      <button type="button" class="btn" id="printAllBtn">Print all sheets</button>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="sheet-picker no-print" id="sheetPicker"></div>
+    <div id="sheetsContainer"></div>
+  </div>
+</div>
+
+<script src="/sheets.js"></script>
+<script src="/print.js"></script>
+</body>
+</html>

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ship a Return — RTV</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · B2B reverse logistics</p>
+      <h1>Ship a return</h1>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Where's this going?</h2>
+    <div class="field-grid">
+      <div class="field">
+        <label for="hubSelect">Shipping from</label>
+        <div class="row-inline">
+          <select id="hubSelect"></select>
+          <button type="button" class="link-btn" id="toggleNewHub" style="white-space:nowrap;">+ New hub</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="vendorSelect">Deliver to</label>
+        <div class="row-inline">
+          <select id="vendorSelect"></select>
+          <button type="button" class="link-btn" id="toggleNewVendor" style="white-space:nowrap;">+ New vendor</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="inline-form" id="newHubForm">
+      <div class="field"><label>Hub name</label><input id="nh-name" placeholder="Zilo Ghatkopar Return Hub"></div>
+      <div class="field"><label>Short code</label><input id="nh-code" placeholder="GHK" maxlength="6"></div>
+      <div class="field span-2"><label>Address</label><input id="nh-address" placeholder="Unit 4, Everest Industrial Estate, LBS Marg, Ghatkopar (W), Mumbai 400086"></div>
+      <div class="field"><label>Phone</label><input id="nh-phone" placeholder="+91 22 6801 4400"></div>
+      <div class="actions">
+        <button type="button" class="btn small" id="saveHub">Save hub</button>
+        <button type="button" class="btn small secondary" id="cancelHub">Cancel</button>
+      </div>
+    </div>
+
+    <div class="inline-form" id="newVendorForm">
+      <div class="field span-2"><label>Brand / vendor name</label><input id="nv-name" placeholder="Northstar Apparel Co."></div>
+      <div class="field"><label>Warehouse label</label><input id="nv-warehouse" placeholder="WH3"></div>
+      <div class="field"><label>Contact phone</label><input id="nv-contact-phone" placeholder="+91 98200 44117"></div>
+      <div class="field span-2"><label>Address</label><input id="nv-address" placeholder="Plot 112, MIDC Industrial Area, Taloja, Navi Mumbai 410208"></div>
+      <div class="actions">
+        <button type="button" class="btn small" id="saveVendor">Save vendor</button>
+        <button type="button" class="btn small secondary" id="cancelVendor">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Courier details</h2>
+    <div class="field-grid">
+      <div class="field">
+        <label for="courierInput">Courier</label>
+        <input id="courierInput" placeholder="SwiftHaul Logistics">
+      </div>
+      <div class="field">
+        <label for="awbInput">AWB / tracking no.</label>
+        <input id="awbInput" class="mono" placeholder="EXPR8827441905">
+      </div>
+      <div class="field span-2">
+        <label for="shipDateInput">Ship date</label>
+        <input id="shipDateInput" type="date">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>What's in the boxes?</h2>
+    <p class="hint">Paste rows: <b>return ID, SKU, description, quantity, box number</b> — tab or comma separated. A header row is skipped automatically. Fix anything by hand in the table below.</p>
+    <textarea id="pasteArea" rows="4" placeholder="return_01J8F3XK2N9	NS-JKT-BLK-M	Aiden Jacket, Black, M	1	1"></textarea>
+    <div style="margin-top:10px; display:flex; gap:8px;">
+      <button type="button" class="btn small" id="parseBtn">Parse into table</button>
+      <button type="button" class="btn small secondary" id="addRowBtn">+ Add row</button>
+    </div>
+
+    <div class="table-wrap" style="margin-top:16px;">
+      <table class="data-table" id="manifestTable">
+        <thead>
+          <tr>
+            <th style="width:22%;">Return ID</th>
+            <th style="width:16%;">SKU</th>
+            <th>Description</th>
+            <th style="width:8%;">Qty</th>
+            <th style="width:8%;">Box #</th>
+            <th style="width:5%;"></th>
+          </tr>
+        </thead>
+        <tbody id="manifestBody"></tbody>
+      </table>
+    </div>
+    <p class="empty-state" id="manifestEmpty">No rows yet — paste a list above or add a row.</p>
+
+    <div class="summary-bar">
+      <div class="stat"><div class="num" id="statBoxes">0</div><div class="lbl">Boxes</div></div>
+      <div class="stat"><div class="num" id="statReturns">0</div><div class="lbl">Return lines</div></div>
+      <div class="stat"><div class="num" id="statUnits">0</div><div class="lbl">Total units</div></div>
+    </div>
+
+    <p class="field-error" id="formError"></p>
+    <button type="button" class="btn" id="createBtn">Create shipment &amp; print</button>
+  </div>
+
+  <div class="card">
+    <h2>Recent shipments</h2>
+    <p class="hint">Reopen any past shipment to reprint its box labels or invoice copies.</p>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Invoice No.</th><th>Ship date</th><th>Hub</th><th>Vendor</th><th>Boxes</th><th>Units</th></tr></thead>
+        <tbody id="recentBody"></tbody>
+      </table>
+    </div>
+    <p class="empty-state" id="recentEmpty" style="display:none;">No shipments created yet.</p>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
