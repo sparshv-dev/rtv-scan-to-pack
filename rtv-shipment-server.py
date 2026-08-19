@@ -129,6 +129,14 @@ class Db:
         cur.executemany(sql, seq_of_params)
         return cur
 
+    def execute_values(self, sql, values, page_size=500):
+        """Bulk insert/upsert in a handful of round-trips instead of one per
+        row — a dump of a few thousand tracking IDs done row-by-row over a
+        remote connection is slow enough to time out the request."""
+        cur = self._conn.cursor()
+        psycopg2.extras.execute_values(cur, sql, values, page_size=page_size)
+        return cur
+
     def commit(self):
         self._conn.commit()
 
@@ -449,34 +457,34 @@ class Handler(BaseHTTPRequestHandler):
         existing_ids = set(
             r["tracking_id"] for r in conn.execute("SELECT tracking_id FROM master_items").fetchall()
         )
-        inserted = 0
-        updated = 0
-        for item in by_tracking.values():
-            if item["trackingId"] in existing_ids:
-                updated += 1
-            else:
-                inserted += 1
-            conn.execute(
-                """
-                INSERT INTO master_items (
-                    tracking_id, marketplace_order_id, return_id, seller_name, rtv_shipment_id,
-                    tms_provider_name, rtv_shipment_status, rtv_created_at, rtv_tracking_id, value,
-                    order_set_id, updated_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (tracking_id) DO UPDATE SET
-                    marketplace_order_id=excluded.marketplace_order_id, return_id=excluded.return_id,
-                    seller_name=excluded.seller_name, rtv_shipment_id=excluded.rtv_shipment_id,
-                    tms_provider_name=excluded.tms_provider_name, rtv_shipment_status=excluded.rtv_shipment_status,
-                    rtv_created_at=excluded.rtv_created_at, rtv_tracking_id=excluded.rtv_tracking_id,
-                    value=excluded.value, order_set_id=excluded.order_set_id, updated_at=excluded.updated_at
-                """,
-                (
-                    item["trackingId"], item["marketplaceOrderId"], item["returnId"], item["sellerName"],
-                    item["rtvShipmentId"], item["tmsProviderName"], item["rtvShipmentStatus"],
-                    item["rtvCreatedAt"], item["rtvTrackingId"], item["value"], item["orderSetId"], now,
-                ),
+        inserted = sum(1 for t in by_tracking if t not in existing_ids)
+        updated = len(by_tracking) - inserted
+
+        values = [
+            (
+                item["trackingId"], item["marketplaceOrderId"], item["returnId"], item["sellerName"],
+                item["rtvShipmentId"], item["tmsProviderName"], item["rtvShipmentStatus"],
+                item["rtvCreatedAt"], item["rtvTrackingId"], item["value"], item["orderSetId"], now,
             )
+            for item in by_tracking.values()
+        ]
+        conn.execute_values(
+            """
+            INSERT INTO master_items (
+                tracking_id, marketplace_order_id, return_id, seller_name, rtv_shipment_id,
+                tms_provider_name, rtv_shipment_status, rtv_created_at, rtv_tracking_id, value,
+                order_set_id, updated_at
+            )
+            VALUES %s
+            ON CONFLICT (tracking_id) DO UPDATE SET
+                marketplace_order_id=excluded.marketplace_order_id, return_id=excluded.return_id,
+                seller_name=excluded.seller_name, rtv_shipment_id=excluded.rtv_shipment_id,
+                tms_provider_name=excluded.tms_provider_name, rtv_shipment_status=excluded.rtv_shipment_status,
+                rtv_created_at=excluded.rtv_created_at, rtv_tracking_id=excluded.rtv_tracking_id,
+                value=excluded.value, order_set_id=excluded.order_set_id, updated_at=excluded.updated_at
+            """,
+            values,
+        )
         conn.commit()
         conn.close()
         self.send_json(200, {"total": len(by_tracking), "inserted": inserted, "updated": updated})
