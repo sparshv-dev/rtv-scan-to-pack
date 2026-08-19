@@ -367,6 +367,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   var state = {
     hubs: [],
     vendors: [],
+    emailTemplate: null, // { subject, body } — fetched at init, kept fresh after saving edits
   };
 
   // ================= toast =================
@@ -1046,21 +1047,42 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   }
 
   // ================= email draft (copy-to-clipboard, no sending) =================
-  function buildEmailDraft(full) {
+  var EMAIL_JUST_ME = "sparsh.v@zilo.one";
+  var EMAIL_TEMPLATE_TOKENS = ["invoiceNo", "vendorName", "hubName", "shipDate", "boxes", "units", "totalValue", "contactName"];
+  var emailPanelSeq = 0; // unique radio-group name per panel instance (batch view can show several panels at once)
+
+  function fillTemplate(tpl, data) {
+    return String(tpl == null ? "" : tpl).replace(/\{\{(\w+)\}\}/g, function (m, key) {
+      return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : m;
+    });
+  }
+
+  function emailTokenData(full) {
     var totals = shipmentTotals(full);
     var grandTotal = full.manifest.reduce(function (sum, r) { return sum + (r.mrp || 0) * (r.qty || 0); }, 0);
-    var subject = "RTV Shipment " + full.invoiceNo + " — " + full.vendor.name;
-    var body =
-      "Dear " + (full.vendor.contactName || "Team") + ",\n\n" +
-      "Please find below the details of a Return-to-Vendor shipment dispatched from " + full.hub.name + ".\n\n" +
-      "Invoice No.: " + full.invoiceNo + "\n" +
-      "Ship Date: " + formatDate(full.shipDate) + "\n" +
-      "Boxes: " + totals.boxes + "\n" +
-      "Total Units: " + totals.units + "\n" +
-      "Total Value: " + formatMoney(grandTotal) + "\n\n" +
-      "The box label(s) and delivery invoice are attached separately — please download them from the app and attach before sending.\n\n" +
-      "Regards,\n" + full.hub.name;
-    return { to: full.vendor.contactEmail || "", subject: subject, body: body };
+    return {
+      invoiceNo: full.invoiceNo,
+      vendorName: full.vendor.name,
+      hubName: full.hub.name,
+      shipDate: formatDate(full.shipDate),
+      boxes: String(totals.boxes),
+      units: String(totals.units),
+      totalValue: formatMoney(grandTotal),
+      contactName: full.vendor.contactName || "Team",
+    };
+  }
+
+  // Template ({{tokens}}) lives in state.emailTemplate — fetched once at init,
+  // updated whenever someone saves an edit — so every draft generated after a
+  // save (in this or any other browser tab) picks up the new wording.
+  function buildEmailDraft(full) {
+    var tpl = state.emailTemplate || { subject: "", body: "" };
+    var data = emailTokenData(full);
+    return {
+      to: full.vendor.contactEmail || "",
+      subject: fillTemplate(tpl.subject, data),
+      body: fillTemplate(tpl.body, data),
+    };
   }
 
   function copyToClipboard(text, onDone) {
@@ -1083,7 +1105,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   }
 
   function buildEmailPanel(full) {
-    var draft = buildEmailDraft(full);
+    emailPanelSeq++;
+    var recipientGroupName = "email-recipient-" + emailPanelSeq;
     var wrap = document.createElement("div");
     wrap.className = "email-panel";
 
@@ -1108,20 +1131,58 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       return row;
     }
 
+    // ---- recipient: "Just me" vs the brand's stored contact email ----
+    var recipientRow = document.createElement("div");
+    recipientRow.className = "field-row";
+    recipientRow.style.gap = "18px";
+    var brandEmail = full.vendor.contactEmail || "";
+
+    function recipientOption(value, labelText, checked) {
+      var label = document.createElement("label");
+      label.style.display = "flex";
+      label.style.alignItems = "center";
+      label.style.gap = "6px";
+      label.style.fontSize = "13px";
+      label.style.fontWeight = "400";
+      var radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = recipientGroupName;
+      radio.value = value;
+      radio.checked = checked;
+      label.appendChild(radio);
+      label.appendChild(document.createTextNode(labelText));
+      return { label: label, radio: radio };
+    }
+    var meOpt = recipientOption("me", "Just me (" + EMAIL_JUST_ME + ")", false);
+    var brandOpt = recipientOption("brand", "Brand (" + (brandEmail || "no email saved") + ")", true);
+    recipientRow.appendChild(meOpt.label);
+    recipientRow.appendChild(brandOpt.label);
+    wrap.appendChild(recipientRow);
+
     var toInput = document.createElement("input");
     toInput.type = "email";
-    toInput.value = draft.to;
+    toInput.value = brandEmail;
     toInput.placeholder = "warehouse@vendor.com";
-    if (!draft.to) {
+    if (!brandEmail) {
       toInput.placeholder = "No contact email saved for this warehouse — type one in or edit the vendor";
     }
+    [meOpt.radio, brandOpt.radio].forEach(function (radio) {
+      radio.addEventListener("change", function () {
+        toInput.value = radio.value === "me" ? EMAIL_JUST_ME : brandEmail;
+      });
+    });
 
     var subjectInput = document.createElement("input");
     subjectInput.type = "text";
-    subjectInput.value = draft.subject;
 
     var bodyTextarea = document.createElement("textarea");
-    bodyTextarea.value = draft.body;
+
+    function refreshDraftFields() {
+      var draft = buildEmailDraft(full);
+      subjectInput.value = draft.subject;
+      bodyTextarea.value = draft.body;
+    }
+    refreshDraftFields();
 
     wrap.appendChild(fieldRow("To", toInput));
     wrap.appendChild(fieldRow("Subject", subjectInput));
@@ -1132,6 +1193,95 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     hint.style.marginTop = "6px";
     hint.textContent = "Edit anything above, then copy each field into a new email in your own mail app. The label/invoice PDF isn't attached automatically — download and attach it separately.";
     wrap.appendChild(hint);
+
+    // ---- edit the default template (applies to every draft generated after saving) ----
+    var editToggle = document.createElement("button");
+    editToggle.type = "button";
+    editToggle.className = "link-btn";
+    editToggle.style.marginTop = "10px";
+    editToggle.textContent = "Edit default subject & body template";
+
+    var editorWrap = document.createElement("div");
+    editorWrap.style.display = "none";
+    editorWrap.style.marginTop = "10px";
+    editorWrap.style.paddingTop = "10px";
+    editorWrap.style.borderTop = "1px dashed var(--line)";
+
+    var tokenLegend = document.createElement("p");
+    tokenLegend.className = "empty-state";
+    tokenLegend.innerHTML = "Available placeholders: " + EMAIL_TEMPLATE_TOKENS.map(function (t) { return "<code class='mono'>{{" + t + "}}</code>"; }).join(" ");
+    editorWrap.appendChild(tokenLegend);
+
+    var subjectTplInput = document.createElement("input");
+    subjectTplInput.type = "text";
+    var bodyTplTextarea = document.createElement("textarea");
+
+    function loadTemplateIntoEditor() {
+      var tpl = state.emailTemplate || { subject: "", body: "" };
+      subjectTplInput.value = tpl.subject;
+      bodyTplTextarea.value = tpl.body;
+    }
+    loadTemplateIntoEditor();
+
+    var subjectTplField = document.createElement("div");
+    subjectTplField.className = "field";
+    subjectTplField.style.marginTop = "8px";
+    var subjectTplLabel = document.createElement("label");
+    subjectTplLabel.textContent = "Subject template";
+    subjectTplField.appendChild(subjectTplLabel);
+    subjectTplField.appendChild(subjectTplInput);
+    editorWrap.appendChild(subjectTplField);
+
+    var bodyTplField = document.createElement("div");
+    bodyTplField.className = "field";
+    bodyTplField.style.marginTop = "8px";
+    var bodyTplLabel = document.createElement("label");
+    bodyTplLabel.textContent = "Body template";
+    bodyTplField.appendChild(bodyTplLabel);
+    bodyTplField.appendChild(bodyTplTextarea);
+    editorWrap.appendChild(bodyTplField);
+
+    var tplActions = document.createElement("div");
+    tplActions.style.display = "flex";
+    tplActions.style.gap = "8px";
+    tplActions.style.marginTop = "10px";
+    var saveTplBtn = document.createElement("button");
+    saveTplBtn.type = "button";
+    saveTplBtn.className = "btn small";
+    saveTplBtn.textContent = "Save template";
+    saveTplBtn.addEventListener("click", function () {
+      var subject = subjectTplInput.value.trim();
+      var bodyTpl = bodyTplTextarea.value.trim();
+      if (!subject || !bodyTpl) { toast("Subject and body templates can't be empty", true); return; }
+      postJson("/api/email-template", { subject: subject, body: bodyTpl })
+        .then(function (saved) {
+          state.emailTemplate = saved;
+          refreshDraftFields();
+          editorWrap.style.display = "none";
+          toast("Template saved — applies to every draft from now on");
+        })
+        .catch(function (err) { toast("Couldn't save template: " + err.message, true); });
+    });
+    var cancelTplBtn = document.createElement("button");
+    cancelTplBtn.type = "button";
+    cancelTplBtn.className = "btn small secondary";
+    cancelTplBtn.textContent = "Cancel";
+    cancelTplBtn.addEventListener("click", function () {
+      loadTemplateIntoEditor();
+      editorWrap.style.display = "none";
+    });
+    tplActions.appendChild(saveTplBtn);
+    tplActions.appendChild(cancelTplBtn);
+    editorWrap.appendChild(tplActions);
+
+    editToggle.addEventListener("click", function () {
+      var open = editorWrap.style.display !== "none";
+      if (!open) loadTemplateIntoEditor();
+      editorWrap.style.display = open ? "none" : "block";
+    });
+
+    wrap.appendChild(editToggle);
+    wrap.appendChild(editorWrap);
 
     return wrap;
   }
@@ -1723,10 +1873,11 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     boxNo = 1;
     renderCurrentBox();
     renderClosedBoxes();
-    Promise.all([getJson("/api/hubs"), getJson("/api/vendors")])
+    Promise.all([getJson("/api/hubs"), getJson("/api/vendors"), getJson("/api/email-template")])
       .then(function (results) {
         state.hubs = results[0];
         state.vendors = results[1];
+        state.emailTemplate = results[2];
         refreshHubSelect();
         refreshBoxVendorSelect();
         renderRecent();

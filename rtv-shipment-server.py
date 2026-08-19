@@ -86,6 +86,22 @@ SEED_SHORT_NAMES = {
     "Rare Rabbit": "RR", "Rareism": "RSM",
 }
 
+# Default email draft template — editable/saveable from the app (see the
+# "settings" table and /api/email-template below). {{tokens}} get filled in
+# per-shipment on the frontend; kept here just as the first-run default.
+DEFAULT_EMAIL_SUBJECT_TEMPLATE = "RTV Shipment {{invoiceNo}} — {{vendorName}}"
+DEFAULT_EMAIL_BODY_TEMPLATE = (
+    "Dear {{contactName}},\n\n"
+    "Please find below the details of a Return-to-Vendor shipment dispatched from {{hubName}}.\n\n"
+    "Invoice No.: {{invoiceNo}}\n"
+    "Ship Date: {{shipDate}}\n"
+    "Boxes: {{boxes}}\n"
+    "Total Units: {{units}}\n"
+    "Total Value: {{totalValue}}\n\n"
+    "The box label(s) and delivery invoice are attached separately — please download them from the app and attach before sending.\n\n"
+    "Regards,\n{{hubName}}"
+)
+
 
 def compose_address(w):
     parts = [w["street"]]
@@ -198,6 +214,10 @@ def init_db():
             value REAL NOT NULL DEFAULT 0,
             qty INTEGER NOT NULL DEFAULT 1,
             box_no INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         );
         """
     )
@@ -331,6 +351,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.lookup_tracking(tracking)
             if path == "/api/shipments":
                 return self.list_shipments()
+            if path == "/api/email-template":
+                return self.get_email_template()
             m = re.match(r"^/api/shipments/(\d+)$", path)
             if m:
                 return self.get_shipment(int(m.group(1)))
@@ -355,6 +377,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.import_dump()
             if path == "/api/shipments":
                 return self.create_shipment()
+            if path == "/api/email-template":
+                return self.save_email_template()
             return self.send_json(404, {"error": "Unknown endpoint"})
         except ApiError as e:
             self.send_json(e.status, {"error": e.message})
@@ -412,6 +436,41 @@ class Handler(BaseHTTPRequestHandler):
         conn.commit()
         conn.close()
         self.send_json(201, vendor_to_dict(row))
+
+    # ---------- email template (shared, applies to every future draft) ----------
+    def get_email_template(self):
+        conn = get_db()
+        rows = conn.execute(
+            "SELECT key, value FROM settings WHERE key IN ('email_subject_template', 'email_body_template')"
+        ).fetchall()
+        conn.close()
+        values = {r["key"]: r["value"] for r in rows}
+        self.send_json(
+            200,
+            {
+                "subject": values.get("email_subject_template", DEFAULT_EMAIL_SUBJECT_TEMPLATE),
+                "body": values.get("email_body_template", DEFAULT_EMAIL_BODY_TEMPLATE),
+            },
+        )
+
+    def save_email_template(self):
+        body = self.read_json_body()
+        subject = require_str(body, "subject")
+        body_text = require_str(body, "body")
+        conn = get_db()
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('email_subject_template', %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            (subject,),
+        )
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('email_body_template', %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            (body_text,),
+        )
+        conn.commit()
+        conn.close()
+        self.send_json(200, {"subject": subject, "body": body_text})
 
     # ---------- master items (tracking -> sku/value lookup) ----------
     def lookup_tracking(self, tracking_id):
