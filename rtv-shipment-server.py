@@ -34,49 +34,49 @@ SEED_WAREHOUSES = [
         "brands": ["Allen Solly", "Van Huesen", "LP", "PE"],
         "street": "Aditya Birla Lifestyle Brands Limited, Survey Nos. 517/2, 527, 528, 529, 530, 531, Madivala Village, Kasaba Hobli, Anekal Taluk",
         "town": "Bangalore", "city": "Bangalore", "state": "Karnataka", "pincode": "562107",
-        "contact_name": "Annamma Mathew P", "contact_phone": "9743993941",
+        "contact_name": "Annamma Mathew P", "contact_phone": "9743993941", "contact_email": "annamma.mathew@ablbl.adityabirla.com",
     },
     {
         "seller": "Arvind Fashions Limited",
         "brands": ["Arrow"],
         "street": "WH No. 4, Arvind Fashions Limited, Omni Return QC Center, C/O Instakart Services Pvt. Ltd., K-Square Industrial Estate, Before Padgha Toll, Bhiwandi",
         "town": "Bhiwandi", "city": "Thane", "state": "Maharashtra", "pincode": "421101",
-        "contact_name": "Bhushan Patil", "contact_phone": "91121 24020",
+        "contact_name": "Bhushan Patil", "contact_phone": "91121 24020", "contact_email": "omni.qccenterAR_MAH@arvindfashions.com",
     },
     {
         "seller": "Arvind Lifestyle Brands Limited",
         "brands": ["USPA"],
         "street": "WH No. 4, Arvind Lifestyle Brands Ltd., Omni NNNOW Return QC Center, C/O Instakart Services Pvt. Ltd., K-Square Industrial Estate, Before Padgha Toll, Bhiwandi",
         "town": "Bhiwandi", "city": "Thane", "state": "Maharashtra", "pincode": "421101",
-        "contact_name": "Bhushan Patil", "contact_phone": "91121 24020",
+        "contact_name": "Bhushan Patil", "contact_phone": "91121 24020", "contact_email": "omni.qccenter_MAH@arvindfashions.com",
     },
     {
         "seller": "Arvind Youth Brands Private Limited",
         "brands": ["Flying Machine"],
         "street": "WH No. 4, Arvind Youth Brands Pvt. Ltd., Omni Return QC Center, C/O Instakart Services Pvt. Ltd., K-Square Industrial Estate, Before Padgha Toll, Bhiwandi",
         "town": "Bhiwandi", "city": "Thane", "state": "Maharashtra", "pincode": "421101",
-        "contact_name": "Bhushan Patil", "contact_phone": "91121 24020",
+        "contact_name": "Bhushan Patil", "contact_phone": "91121 24020", "contact_email": "omni.qccenterFM_MAH@arvindfashions.com",
     },
     {
         "seller": "Biba Fashion Limited",
         "brands": [],
         "street": "Biba Fashion Ltd., Khasra No. 30/21/3/2/2, 35/1/2/3., Killa -2 Rakba-3. Kamal-0. Marla 1/ 2 13 MIN 7.14.15/1.15/2,60/2 Village Sikri",
         "town": "Tehsil Ballabahgarh", "city": "Faridabad", "state": "NCR", "pincode": "121004",
-        "contact_name": "Mr. Praveen", "contact_phone": "9945403556",
+        "contact_name": "Mr. Praveen", "contact_phone": "9945403556", "contact_email": "praveen.kumar@bibaindia.com",
     },
     {
         "seller": "Soch Apparels Pvt Ltd",
         "brands": [],
         "street": "Mumbai Warehouse Bhiwandi, Address: Soch Apparels Private Limited Bhiwandi, Asmeeta Textile Park, Bldg No. D-3A, Unit No. 004 Ground Floor",
         "town": "Bhiwandi", "city": "", "state": "", "pincode": "421311",
-        "contact_name": "Abhijeet", "contact_phone": "9702768637",
+        "contact_name": "Abhijeet", "contact_phone": "9702768637", "contact_email": "swb@favouriteshop.biz",
     },
     {
         "seller": "Radhamani Textile Pvt Ltd",
         "brands": ["Rare Rabbit", "Rareism"],
         "street": "Radhamani Textiles Pvt Ltd. (WH MH), Instakart Service Pvt Ltd, Vashere, Bhiwandi, Warehouse No. WE-IL, Renaissanse Integrated Industrial Area, Repro Books Ltd Plant, Vashere",
         "town": "Bhiwandi", "city": "Thane", "state": "Maharashtra", "pincode": "421302",
-        "contact_name": "Chetan Mhatre", "contact_phone": "9773535457",
+        "contact_name": "Chetan Mhatre", "contact_phone": "9773535457", "contact_email": "chetan.mhatre@flipkart.com",
     },
 ]
 SEED_SHORT_NAMES = {
@@ -168,6 +168,7 @@ def init_db():
             contact_name TEXT,
             contact_phone TEXT
         );
+        ALTER TABLE vendors ADD COLUMN IF NOT EXISTS contact_email TEXT;
         CREATE TABLE IF NOT EXISTS master_items (
             tracking_id TEXT PRIMARY KEY,
             marketplace_order_id TEXT,
@@ -202,19 +203,24 @@ def init_db():
     )
     conn.commit()
 
-    seeded = conn.execute("SELECT COUNT(*) AS count FROM vendors").fetchone()["count"]
-    if seeded == 0:
-        now = datetime.now(timezone.utc).isoformat()
-        for w in SEED_WAREHOUSES:
-            address = compose_address(w)
-            keys = w["brands"] or [w["seller"]]
-            for name in keys:
-                conn.execute(
-                    "INSERT INTO vendors (name, short_name, warehouse_label, address, contact_name, contact_phone) "
-                    "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (name) DO NOTHING",
-                    (name, SEED_SHORT_NAMES.get(name, ""), "", address, w["contact_name"], w["contact_phone"]),
-                )
-        conn.commit()
+    # Runs on every startup, not just an empty table: inserts any brand new
+    # vendors that don't exist yet, and backfills contact_email on existing
+    # rows that don't have one (e.g. vendors seeded before that field
+    # existed) — without touching anything a user has since edited by hand.
+    for w in SEED_WAREHOUSES:
+        address = compose_address(w)
+        keys = w["brands"] or [w["seller"]]
+        for name in keys:
+            conn.execute(
+                """
+                INSERT INTO vendors (name, short_name, warehouse_label, address, contact_name, contact_phone, contact_email)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (name) DO UPDATE SET contact_email = EXCLUDED.contact_email
+                WHERE vendors.contact_email IS NULL OR vendors.contact_email = ''
+                """,
+                (name, SEED_SHORT_NAMES.get(name, ""), "", address, w["contact_name"], w["contact_phone"], w.get("contact_email", "")),
+            )
+    conn.commit()
     conn.close()
 
 
@@ -231,6 +237,7 @@ def vendor_to_dict(row):
         "address": row["address"],
         "contactName": row["contact_name"],
         "contactPhone": row["contact_phone"],
+        "contactEmail": row["contact_email"],
     }
 
 
@@ -391,15 +398,16 @@ class Handler(BaseHTTPRequestHandler):
         warehouse_label = (body.get("warehouseLabel") or "").strip()
         contact_name = (body.get("contactName") or "").strip()
         contact_phone = (body.get("contactPhone") or "").strip()
+        contact_email = (body.get("contactEmail") or "").strip()
         conn = get_db()
         existing = conn.execute("SELECT * FROM vendors WHERE name = %s", (name,)).fetchone()
         if existing:
             conn.close()
             raise ApiError(409, f"A warehouse for '{name}' already exists")
         row = conn.execute(
-            "INSERT INTO vendors (name, short_name, warehouse_label, address, contact_name, contact_phone) "
-            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
-            (name, short_name, warehouse_label, address, contact_name, contact_phone),
+            "INSERT INTO vendors (name, short_name, warehouse_label, address, contact_name, contact_phone, contact_email) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *",
+            (name, short_name, warehouse_label, address, contact_name, contact_phone, contact_email),
         ).fetchone()
         conn.commit()
         conn.close()

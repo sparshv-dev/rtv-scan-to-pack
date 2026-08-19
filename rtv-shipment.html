@@ -54,6 +54,16 @@ a { color: var(--accent); }
 .inline-form .field.span-2 { grid-column: 1 / -1; }
 .inline-form .actions { grid-column: 1 / -1; display: flex; gap: 8px; }
 
+.email-panel { display: none; margin-top: 10px; padding: 14px 16px; border: 1px dashed var(--line); border-radius: 8px; background: var(--zebra); }
+.email-panel.is-open { display: block; }
+.email-panel .field-row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 10px; }
+.email-panel .field-row:last-child { margin-bottom: 0; align-items: stretch; }
+.email-panel .field { flex: 1; display: flex; flex-direction: column; gap: 5px; }
+.email-panel .field label { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.email-panel .field input, .email-panel .field textarea { font: inherit; font-size: 13px; padding: 9px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink); }
+.email-panel .field textarea { min-height: 170px; resize: vertical; }
+.email-panel .copy-btn { align-self: flex-end; white-space: nowrap; }
+
 table.data-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 table.data-table th { text-align: left; font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid var(--line); padding: 7px 8px; font-weight: 700; }
 table.data-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -234,6 +244,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <div class="field"><label>Short name</label><input id="nb-shortName" placeholder="ARW" maxlength="10"></div>
       <div class="field span-2"><label>Address</label><input id="nb-address" placeholder="WH No. 4, Omni Return QC Center, Bhiwandi, Thane, Maharashtra 421101"></div>
       <div class="field"><label>Contact phone</label><input id="nb-contactPhone" placeholder="+91 98200 44117"></div>
+      <div class="field"><label>Contact email</label><input id="nb-contactEmail" type="email" placeholder="warehouse@vendor.com"></div>
       <div class="actions">
         <button type="button" class="btn small" id="saveBrand">Save brand</button>
         <button type="button" class="btn small secondary" id="cancelBrand">Cancel</button>
@@ -307,8 +318,10 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <button type="button" class="btn secondary" id="printOneBtn">Print this sheet</button>
       <button type="button" class="btn secondary" id="printLabelsBtn">Print box label(s) — 4×6</button>
       <button type="button" class="btn" id="printInvoicesBtn">Print both invoices — A4</button>
+      <button type="button" class="btn secondary" id="printEmailBtn">Email</button>
     </div>
   </div>
+  <div id="printEmailPanel" class="no-print"></div>
   <p class="no-print" style="margin: -8px 0 4px; font-size: 12.5px; color: var(--muted); max-width: 62ch;">Box labels and invoices are printed as separate jobs, at their own paper size — send them to your label printer and office printer separately.</p>
   <div class="stage">
     <div class="sheet-picker no-print" id="sheetPicker"></div>
@@ -1032,6 +1045,97 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     return sheets;
   }
 
+  // ================= email draft (copy-to-clipboard, no sending) =================
+  function buildEmailDraft(full) {
+    var totals = shipmentTotals(full);
+    var grandTotal = full.manifest.reduce(function (sum, r) { return sum + (r.mrp || 0) * (r.qty || 0); }, 0);
+    var subject = "RTV Shipment " + full.invoiceNo + " — " + full.vendor.name;
+    var body =
+      "Dear " + (full.vendor.contactName || "Team") + ",\n\n" +
+      "Please find below the details of a Return-to-Vendor shipment dispatched from " + full.hub.name + ".\n\n" +
+      "Invoice No.: " + full.invoiceNo + "\n" +
+      "Ship Date: " + formatDate(full.shipDate) + "\n" +
+      "Boxes: " + totals.boxes + "\n" +
+      "Total Units: " + totals.units + "\n" +
+      "Total Value: " + formatMoney(grandTotal) + "\n\n" +
+      "The box label(s) and delivery invoice are attached separately — please download them from the app and attach before sending.\n\n" +
+      "Regards,\n" + full.hub.name;
+    return { to: full.vendor.contactEmail || "", subject: subject, body: body };
+  }
+
+  function copyToClipboard(text, onDone) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(onDone, function () { fallbackCopy(text); onDone(); });
+    } else {
+      fallbackCopy(text);
+      onDone();
+    }
+  }
+  function fallbackCopy(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (e) { /* best effort */ }
+    document.body.removeChild(ta);
+  }
+
+  function buildEmailPanel(full) {
+    var draft = buildEmailDraft(full);
+    var wrap = document.createElement("div");
+    wrap.className = "email-panel";
+
+    function fieldRow(labelText, inputEl) {
+      var row = document.createElement("div");
+      row.className = "field-row";
+      var fieldDiv = document.createElement("div");
+      fieldDiv.className = "field";
+      var label = document.createElement("label");
+      label.textContent = labelText;
+      fieldDiv.appendChild(label);
+      fieldDiv.appendChild(inputEl);
+      var copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "btn small secondary copy-btn";
+      copyBtn.textContent = "Copy";
+      copyBtn.addEventListener("click", function () {
+        copyToClipboard(inputEl.value, function () { toast(labelText + " copied"); });
+      });
+      row.appendChild(fieldDiv);
+      row.appendChild(copyBtn);
+      return row;
+    }
+
+    var toInput = document.createElement("input");
+    toInput.type = "email";
+    toInput.value = draft.to;
+    toInput.placeholder = "warehouse@vendor.com";
+    if (!draft.to) {
+      toInput.placeholder = "No contact email saved for this warehouse — type one in or edit the vendor";
+    }
+
+    var subjectInput = document.createElement("input");
+    subjectInput.type = "text";
+    subjectInput.value = draft.subject;
+
+    var bodyTextarea = document.createElement("textarea");
+    bodyTextarea.value = draft.body;
+
+    wrap.appendChild(fieldRow("To", toInput));
+    wrap.appendChild(fieldRow("Subject", subjectInput));
+    wrap.appendChild(fieldRow("Body", bodyTextarea));
+
+    var hint = document.createElement("p");
+    hint.className = "empty-state";
+    hint.style.marginTop = "6px";
+    hint.textContent = "Edit anything above, then copy each field into a new email in your own mail app. The label/invoice PDF isn't attached automatically — download and attach it separately.";
+    wrap.appendChild(hint);
+
+    return wrap;
+  }
+
   function renderSheetPicker(containerEl, pickerEl, sheets) {
     containerEl.innerHTML = "";
     pickerEl.innerHTML = "";
@@ -1072,7 +1176,15 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     document.getElementById("metaTotals").textContent = totals.boxes + " box" + (totals.boxes === 1 ? "" : "es") + " · " + totals.returns + " returns · " + totals.units + " units";
 
     renderSheetPicker(document.getElementById("sheetsContainer"), document.getElementById("sheetPicker"), buildSheets(full));
+
+    var emailPanelEl = document.getElementById("printEmailPanel");
+    emailPanelEl.innerHTML = "";
+    emailPanelEl.appendChild(buildEmailPanel(full));
   }
+
+  document.getElementById("printEmailBtn").addEventListener("click", function () {
+    document.getElementById("printEmailPanel").firstElementChild.classList.toggle("is-open");
+  });
 
   // Each print job is single-sized: labels go to a 4x6 label printer, invoices to
   // an A4 printer, so we never mix page sizes within one print() call — that's
@@ -1368,13 +1480,14 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       name: name, address: address,
       shortName: document.getElementById("nb-shortName").value.trim(),
       contactPhone: document.getElementById("nb-contactPhone").value.trim(),
+      contactEmail: document.getElementById("nb-contactEmail").value.trim(),
     }).then(function (vendor) {
       state.vendors.push(vendor);
       refreshBoxVendorSelect();
       document.getElementById("boxVendorSelect").value = vendor.id;
       applyBoxVendorSelection();
       document.getElementById("newBrandForm").classList.remove("is-open");
-      ["nb-name", "nb-shortName", "nb-address", "nb-contactPhone"].forEach(function (id) { document.getElementById(id).value = ""; });
+      ["nb-name", "nb-shortName", "nb-address", "nb-contactPhone", "nb-contactEmail"].forEach(function (id) { document.getElementById(id).value = ""; });
       toast("Brand saved: " + vendor.name);
     }).catch(function (err) { toast("Couldn't save brand: " + err.message, true); });
   });
@@ -1523,11 +1636,19 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       dlBtn.className = "btn";
       dlBtn.textContent = "Download PDF";
       dlBtn.addEventListener("click", function () { downloadBrandPdf(full); });
+      var emailPanel = buildEmailPanel(full);
+      var emailBtn = document.createElement("button");
+      emailBtn.type = "button";
+      emailBtn.className = "btn secondary";
+      emailBtn.textContent = "Email";
+      emailBtn.addEventListener("click", function () { emailPanel.classList.toggle("is-open"); });
+      dlActions.appendChild(emailBtn);
       dlActions.appendChild(dlXlsBtn);
       dlActions.appendChild(dlBtn);
       head.appendChild(headInfo);
       head.appendChild(dlActions);
       panel.appendChild(head);
+      panel.appendChild(emailPanel);
 
       var stageEl = document.createElement("div");
       stageEl.className = "stage";
