@@ -1049,7 +1049,6 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   // ================= email draft (copy-to-clipboard, no sending) =================
   var EMAIL_JUST_ME = "sparsh.v@zilo.one";
   var EMAIL_TEMPLATE_TOKENS = ["invoiceNo", "vendorName", "hubName", "shipDate", "boxes", "units", "totalValue", "contactName"];
-  var emailPanelSeq = 0; // unique radio-group name per panel instance (batch view can show several panels at once)
 
   function fillTemplate(tpl, data) {
     return String(tpl == null ? "" : tpl).replace(/\{\{(\w+)\}\}/g, function (m, key) {
@@ -1105,8 +1104,6 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   }
 
   function buildEmailPanel(full) {
-    emailPanelSeq++;
-    var recipientGroupName = "email-recipient-" + emailPanelSeq;
     var wrap = document.createElement("div");
     wrap.className = "email-panel";
 
@@ -1131,46 +1128,13 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       return row;
     }
 
-    // ---- recipient: "Just me" vs the brand's stored contact email ----
-    var recipientRow = document.createElement("div");
-    recipientRow.className = "field-row";
-    recipientRow.style.gap = "18px";
-    var brandEmail = full.vendor.contactEmail || "";
-
-    function recipientOption(value, labelText, checked) {
-      var label = document.createElement("label");
-      label.style.display = "flex";
-      label.style.alignItems = "center";
-      label.style.gap = "6px";
-      label.style.fontSize = "13px";
-      label.style.fontWeight = "400";
-      var radio = document.createElement("input");
-      radio.type = "radio";
-      radio.name = recipientGroupName;
-      radio.value = value;
-      radio.checked = checked;
-      label.appendChild(radio);
-      label.appendChild(document.createTextNode(labelText));
-      return { label: label, radio: radio };
-    }
-    var meOpt = recipientOption("me", "Just me (" + EMAIL_JUST_ME + ")", false);
-    var brandOpt = recipientOption("brand", "Brand (" + (brandEmail || "no email saved") + ")", true);
-    recipientRow.appendChild(meOpt.label);
-    recipientRow.appendChild(brandOpt.label);
-    wrap.appendChild(recipientRow);
-
+    // Recipient is fixed to "Just me" for now — the brand's stored contact
+    // email option is disabled until it's wanted back (see contactEmail on
+    // the vendor record, still stored, just not offered as a choice here).
     var toInput = document.createElement("input");
     toInput.type = "email";
-    toInput.value = brandEmail;
+    toInput.value = EMAIL_JUST_ME;
     toInput.placeholder = "warehouse@vendor.com";
-    if (!brandEmail) {
-      toInput.placeholder = "No contact email saved for this warehouse — type one in or edit the vendor";
-    }
-    [meOpt.radio, brandOpt.radio].forEach(function (radio) {
-      radio.addEventListener("change", function () {
-        toInput.value = radio.value === "me" ? EMAIL_JUST_ME : brandEmail;
-      });
-    });
 
     var subjectInput = document.createElement("input");
     subjectInput.type = "text";
