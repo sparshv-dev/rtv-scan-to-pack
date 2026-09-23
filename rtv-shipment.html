@@ -1047,7 +1047,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   }
 
   // ================= email draft (copy-to-clipboard, no sending) =================
-  var EMAIL_JUST_ME = "sparsh.v@zilo.one";
+  var EMAIL_DEFAULT_TO = "sparsh.v@zilo.one, operations@zilo.one";
   var EMAIL_TEMPLATE_TOKENS = ["invoiceNo", "vendorName", "hubName", "shipDate", "boxes", "units", "totalValue", "contactName"];
 
   function fillTemplate(tpl, data) {
@@ -1128,12 +1128,14 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       return row;
     }
 
-    // Recipient is fixed to "Just me" for now — the brand's stored contact
-    // email option is disabled until it's wanted back (see contactEmail on
-    // the vendor record, still stored, just not offered as a choice here).
+    // Recipient is fixed to a default pair for now — the brand's stored
+    // contact email option is disabled until it's wanted back (see
+    // contactEmail on the vendor record, still stored, just not offered as
+    // a choice here).
     var toInput = document.createElement("input");
     toInput.type = "email";
-    toInput.value = EMAIL_JUST_ME;
+    toInput.setAttribute("multiple", "");
+    toInput.value = EMAIL_DEFAULT_TO;
     toInput.placeholder = "warehouse@vendor.com";
 
     var subjectInput = document.createElement("input");
