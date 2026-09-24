@@ -323,6 +323,17 @@ COURIER_BOOKING_CONSTANTS = {
 }
 
 
+def compute_origin_name(hub_name):
+    if not hub_name:
+        return None
+    # Some hubs are already named e.g. "Zilo Parel Hub" — don't double up
+    # into "Zilo Zilo Parel Hub Warehouse". Only pad out bare names like
+    # "Parel" into the full "Zilo Parel Warehouse" form.
+    if "zilo" in hub_name.lower():
+        return hub_name
+    return f"Zilo {hub_name} Warehouse"
+
+
 def courier_booking_to_dict(row):
     hub_name = row["hub_name"]
     hub_contact_name = row["hub_contact_name"]
@@ -345,7 +356,7 @@ def courier_booking_to_dict(row):
         "destinationPhone": row["vendor_contact_phone"],
         "destinationAddress": row["vendor_address"],
         "hubName": hub_name,
-        "originName": (f"Zilo {hub_name} Warehouse" if hub_name else None),
+        "originName": compute_origin_name(hub_name),
         "originPincode": row["hub_pincode"],
         "originPhone": origin_phone,
         "originAddress": row["hub_address"],
