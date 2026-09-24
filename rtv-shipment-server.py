@@ -118,8 +118,13 @@ def compose_address(w):
 
 
 def parse_pincode(address):
-    m = re.search(r"(\d{6})\s*$", address or "")
-    return m.group(1) if m else ""
+    # Not anchored to the end — real addresses in this data put the pincode
+    # anywhere ("PIN -400064 (Maharashtra)", "400 705" with a stray space,
+    # trailing punctuation like "400052."). Take the last match, since a
+    # pincode-shaped number nearest the end of a real address is almost
+    # always the actual pincode.
+    matches = re.findall(r"\b(\d{3})\s?(\d{3})\b", address or "")
+    return "".join(matches[-1]) if matches else ""
 
 
 def database_url():
