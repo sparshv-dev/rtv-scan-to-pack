@@ -219,6 +219,20 @@ def init_db():
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS courier_bookings (
+            id SERIAL PRIMARY KEY,
+            vendor_id INTEGER NOT NULL REFERENCES vendors(id),
+            pickup_date TEXT NOT NULL,
+            boxes INTEGER NOT NULL,
+            declared_price REAL NOT NULL,
+            weight_kg REAL NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS courier_booking_shipments (
+            booking_id INTEGER NOT NULL REFERENCES courier_bookings(id) ON DELETE CASCADE,
+            shipment_id INTEGER NOT NULL REFERENCES shipments(id) UNIQUE,
+            PRIMARY KEY (booking_id, shipment_id)
+        );
         """
     )
     conn.commit()
@@ -353,6 +367,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.list_shipments()
             if path == "/api/email-template":
                 return self.get_email_template()
+            if path == "/api/shipments/bookable":
+                q = (qs.get("q") or [""])[0].strip()
+                return self.list_bookable_shipments(q)
+            if path == "/api/courier-bookings":
+                return self.list_courier_bookings()
             m = re.match(r"^/api/shipments/(\d+)$", path)
             if m:
                 return self.get_shipment(int(m.group(1)))
@@ -379,6 +398,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self.create_shipment()
             if path == "/api/email-template":
                 return self.save_email_template()
+            if path == "/api/courier-bookings":
+                return self.create_courier_booking()
+            return self.send_json(404, {"error": "Unknown endpoint"})
+        except ApiError as e:
+            self.send_json(e.status, {"error": e.message})
+        except Exception as e:  # noqa: BLE001
+            self.send_json(500, {"error": str(e)})
+
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        try:
+            m = re.match(r"^/api/courier-bookings/(\d+)$", path)
+            if m:
+                return self.delete_courier_booking(int(m.group(1)))
             return self.send_json(404, {"error": "Unknown endpoint"})
         except ApiError as e:
             self.send_json(e.status, {"error": e.message})
@@ -683,6 +717,138 @@ class Handler(BaseHTTPRequestHandler):
         conn.commit()
         conn.close()
         self.send_json(201, {"id": shipment_id, "invoiceNo": invoice_no})
+
+    # ---------- courier bookings (DTDC pickups bundling one or more invoices) ----------
+    def list_bookable_shipments(self, q):
+        conn = get_db()
+        sql = (
+            "SELECT s.id, s.invoice_no, s.ship_date, s.vendor_id, v.name AS vendor_name, v.warehouse_label, "
+            "(SELECT COUNT(DISTINCT box_no) FROM shipment_items WHERE shipment_id = s.id) AS boxes, "
+            "(SELECT COALESCE(SUM(qty * value), 0) FROM shipment_items WHERE shipment_id = s.id) AS amount "
+            "FROM shipments s JOIN vendors v ON v.id = s.vendor_id "
+            "WHERE s.id NOT IN (SELECT shipment_id FROM courier_booking_shipments)"
+        )
+        params = []
+        if q:
+            sql += " AND (s.invoice_no ILIKE %s OR v.name ILIKE %s)"
+            like = f"%{q}%"
+            params.extend([like, like])
+        sql += " ORDER BY s.id DESC LIMIT 50"
+        rows = conn.execute(sql, tuple(params)).fetchall()
+        conn.close()
+        out = [
+            {
+                "id": r["id"],
+                "invoiceNo": r["invoice_no"],
+                "shipDate": r["ship_date"],
+                "vendorId": r["vendor_id"],
+                "vendorName": r["vendor_name"],
+                "warehouseLabel": r["warehouse_label"],
+                "boxes": r["boxes"],
+                "amount": r["amount"],
+            }
+            for r in rows
+        ]
+        self.send_json(200, out)
+
+    def list_courier_bookings(self):
+        conn = get_db()
+        rows = conn.execute(
+            """
+            SELECT b.id, b.pickup_date, b.boxes, b.declared_price, b.weight_kg, b.created_at,
+                   v.name AS vendor_name, v.warehouse_label,
+                   string_agg(s.invoice_no, ', ' ORDER BY s.invoice_no) AS invoice_numbers
+            FROM courier_bookings b
+            JOIN vendors v ON v.id = b.vendor_id
+            JOIN courier_booking_shipments cbs ON cbs.booking_id = b.id
+            JOIN shipments s ON s.id = cbs.shipment_id
+            GROUP BY b.id, v.name, v.warehouse_label
+            ORDER BY b.id DESC
+            """
+        ).fetchall()
+        conn.close()
+        out = [
+            {
+                "id": r["id"],
+                "pickupDate": r["pickup_date"],
+                "boxes": r["boxes"],
+                "declaredPrice": r["declared_price"],
+                "weightKg": r["weight_kg"],
+                "createdAt": r["created_at"],
+                "vendorName": r["vendor_name"],
+                "warehouseLabel": r["warehouse_label"],
+                "invoiceNumbers": r["invoice_numbers"],
+            }
+            for r in rows
+        ]
+        self.send_json(200, out)
+
+    def create_courier_booking(self):
+        body = self.read_json_body()
+        shipment_ids = body.get("shipmentIds")
+        if not isinstance(shipment_ids, list) or not shipment_ids:
+            raise ApiError(400, "shipmentIds must be a non-empty list")
+        try:
+            shipment_ids = [int(x) for x in shipment_ids]
+        except (TypeError, ValueError):
+            raise ApiError(400, "shipmentIds must be numbers")
+        pickup_date = require_str(body, "pickupDate")
+        try:
+            boxes = int(body.get("boxes"))
+            declared_price = float(body.get("declaredPrice"))
+            weight_kg = float(body.get("weightKg"))
+        except (TypeError, ValueError):
+            raise ApiError(400, "boxes, declaredPrice and weightKg must be numbers")
+        if boxes < 1:
+            raise ApiError(400, "boxes must be >= 1")
+        if weight_kg <= 0:
+            raise ApiError(400, "weightKg must be greater than 0")
+
+        conn = get_db()
+        placeholders = ",".join(["%s"] * len(shipment_ids))
+        rows = conn.execute(f"SELECT * FROM shipments WHERE id IN ({placeholders})", tuple(shipment_ids)).fetchall()
+        if len(rows) != len(set(shipment_ids)):
+            conn.close()
+            raise ApiError(400, "One or more shipmentIds don't exist")
+        vendor_ids = set(r["vendor_id"] for r in rows)
+        if len(vendor_ids) > 1:
+            conn.close()
+            raise ApiError(400, "All invoices in one booking must be for the same store")
+        vendor_id = vendor_ids.pop()
+
+        already_booked = conn.execute(
+            f"SELECT shipment_id FROM courier_booking_shipments WHERE shipment_id IN ({placeholders})",
+            tuple(shipment_ids),
+        ).fetchall()
+        if already_booked:
+            conn.close()
+            raise ApiError(409, "One or more invoices are already in another courier booking")
+
+        created_at = datetime.now(timezone.utc).isoformat()
+        booking_row = conn.execute(
+            "INSERT INTO courier_bookings (vendor_id, pickup_date, boxes, declared_price, weight_kg, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+            (vendor_id, pickup_date, boxes, declared_price, weight_kg, created_at),
+        ).fetchone()
+        booking_id = booking_row["id"]
+        conn.executemany(
+            "INSERT INTO courier_booking_shipments (booking_id, shipment_id) VALUES (%s, %s)",
+            [(booking_id, sid) for sid in shipment_ids],
+        )
+        conn.commit()
+        conn.close()
+        self.send_json(201, {"id": booking_id})
+
+    def delete_courier_booking(self, booking_id):
+        conn = get_db()
+        row = conn.execute("SELECT id FROM courier_bookings WHERE id = %s", (booking_id,)).fetchone()
+        if not row:
+            conn.close()
+            raise ApiError(404, "Booking not found")
+        conn.execute("DELETE FROM courier_bookings WHERE id = %s", (booking_id,))
+        conn.commit()
+        conn.close()
+        self.send_json(200, {"id": booking_id})
 
 
 def main():

@@ -84,6 +84,17 @@ a { color: var(--accent); }
 .brand-picker-flat-row { padding-left: 12px; font-weight: 600; }
 .brand-location-row .loc-meta { display: block; color: var(--muted); font-size: 11px; font-weight: 400; }
 
+/* ---- courier booking: invoice search + selected chips ---- */
+.cb-search-results { margin-top: 6px; border: 1px solid var(--line); border-radius: 8px; max-height: 220px; overflow-y: auto; background: var(--paper-raised); }
+.cb-search-results:empty { display: none; border: none; }
+.cb-result-row { display: block; width: 100%; text-align: left; padding: 8px 12px; font: inherit; font-size: 12.5px; background: none; border: none; border-bottom: 1px solid var(--line); cursor: pointer; color: var(--ink); }
+.cb-result-row:last-child { border-bottom: none; }
+.cb-result-row:hover { background: var(--zebra); }
+.cb-result-row .r-meta { display: block; color: var(--muted); font-size: 11px; }
+.cb-selected-invoices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.cb-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--zebra); border: 1px solid var(--line); border-radius: 999px; padding: 5px 6px 5px 12px; font-size: 12px; }
+.cb-chip button { background: none; border: none; color: var(--bad); cursor: pointer; font-size: 13px; padding: 0 4px; line-height: 1; }
+
 table.data-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 table.data-table th { text-align: left; font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid var(--line); padding: 7px 8px; font-weight: 700; }
 table.data-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -204,6 +215,13 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 <style id="dynamicPageSize"></style>
 </head>
 <body>
+
+<div class="app-shell no-print" style="padding-bottom:0;">
+  <div class="brand-tabs" id="topTabs" role="tablist">
+    <button type="button" id="tabPackShipments" aria-selected="true">Pack shipments</button>
+    <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings <span style="font-weight:400; opacity:0.7;">(testing)</span></button>
+  </div>
+</div>
 
 <div class="app-shell" id="formView">
   <div class="app-head">
@@ -359,6 +377,52 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   </div>
   <div class="brand-tabs" id="brandTabs" role="tablist"></div>
   <div id="brandPanels"></div>
+</div>
+
+<div class="app-shell" id="courierBookingsView" style="display:none;">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · courier pickup (testing)</p>
+      <h1>Book a courier pickup</h1>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>New booking</h2>
+    <p class="hint">Search and pick one or more invoices going to the same store, then fill in the pickup details for DTDC. Once an invoice is used here, it won't show up again for a future booking.</p>
+
+    <div class="field">
+      <label for="cbInvoiceSearch">Search invoices</label>
+      <input id="cbInvoiceSearch" placeholder="Search by invoice number or store…" autocomplete="off">
+    </div>
+    <div id="cbSearchResults" class="cb-search-results"></div>
+    <p class="field-error" id="cbSearchHint"></p>
+
+    <div id="cbSelectedInvoices" class="cb-selected-invoices"></div>
+    <p class="empty-state" id="cbSelectedEmpty">No invoices selected yet.</p>
+
+    <div class="field-grid" style="margin-top:16px;">
+      <div class="field"><label>Brand</label><input id="cbBrand" disabled></div>
+      <div class="field"><label>Store</label><input id="cbStore" disabled></div>
+      <div class="field"><label>Number of boxes</label><input id="cbBoxes" type="number" min="1" step="1"></div>
+      <div class="field"><label>Declared price</label><input id="cbDeclaredPrice" type="number" min="0" step="0.01"></div>
+      <div class="field"><label>Weight (KG)</label><input id="cbWeight" type="number" min="0.01" step="0.01" placeholder="e.g. 4.5"></div>
+      <div class="field"><label>Tentative pickup date</label><input id="cbPickupDate" type="date"></div>
+    </div>
+    <p class="field-error" id="cbError"></p>
+    <button type="button" class="btn" id="cbCreateBtn" style="margin-top:12px;" disabled>Create booking</button>
+  </div>
+
+  <div class="card">
+    <h2>Bookings</h2>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Pickup date</th><th>Brand</th><th>Store</th><th class="num-col">Boxes</th><th class="num-col">Declared price</th><th class="num-col">Weight (KG)</th><th>Invoice(s)</th><th></th></tr></thead>
+        <tbody id="cbBookingsBody"></tbody>
+      </table>
+    </div>
+    <p class="empty-state" id="cbBookingsEmpty" style="display:none;">No courier bookings yet.</p>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -1999,6 +2063,195 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       });
     }).catch(function (err) { toast("Couldn't load shipments: " + err.message, true); });
   }
+
+  // ================= courier bookings (testing) =================
+  // Bundles one or more already-created invoices into a single DTDC pickup
+  // booking. Server enforces same-store-only and rejects an invoice already
+  // used in another booking, so the two error modes this was built to fix
+  // (wrong/duplicate invoice numbers, mistyped fields) can't happen here.
+  var cbSelectedShipments = []; // [{id, invoiceNo, vendorId, vendorName, boxes, amount, shipDate}]
+  var cbLoaded = false;
+
+  function cbRenderSelected() {
+    var wrap = document.getElementById("cbSelectedInvoices");
+    wrap.innerHTML = "";
+    document.getElementById("cbSelectedEmpty").style.display = cbSelectedShipments.length ? "none" : "block";
+    cbSelectedShipments.forEach(function (s, idx) {
+      var chip = document.createElement("span");
+      chip.className = "cb-chip";
+      chip.appendChild(document.createTextNode(s.invoiceNo));
+      var removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.textContent = "✕";
+      removeBtn.title = "Remove";
+      removeBtn.addEventListener("click", function () {
+        cbSelectedShipments.splice(idx, 1);
+        cbRenderSelected();
+        cbRecomputeFields();
+        cbUpdateSearchHint();
+      });
+      chip.appendChild(removeBtn);
+      wrap.appendChild(chip);
+    });
+  }
+
+  // Boxes/declared price recompute from scratch on every add/remove — edit
+  // them once you're done picking invoices, not mid-selection, or a manual
+  // tweak gets overwritten by the next recompute.
+  function cbRecomputeFields() {
+    var brandInput = document.getElementById("cbBrand");
+    var storeInput = document.getElementById("cbStore");
+    var boxesInput = document.getElementById("cbBoxes");
+    var priceInput = document.getElementById("cbDeclaredPrice");
+    var createBtn = document.getElementById("cbCreateBtn");
+
+    if (cbSelectedShipments.length === 0) {
+      brandInput.value = "";
+      storeInput.value = "";
+      boxesInput.value = "";
+      priceInput.value = "";
+      createBtn.disabled = true;
+      return;
+    }
+    var vendorName = cbSelectedShipments[0].vendorName;
+    brandInput.value = brandPrefix(vendorName);
+    storeInput.value = vendorName;
+    boxesInput.value = cbSelectedShipments.reduce(function (sum, s) { return sum + s.boxes; }, 0);
+    priceInput.value = cbSelectedShipments.reduce(function (sum, s) { return sum + s.amount; }, 0).toFixed(2);
+    createBtn.disabled = false;
+  }
+
+  function cbUpdateSearchHint() {
+    var hint = document.getElementById("cbSearchHint");
+    hint.textContent = cbSelectedShipments.length
+      ? "Showing only invoices for " + cbSelectedShipments[0].vendorName + " — remove all selected invoices to search a different store."
+      : "";
+  }
+
+  function cbAddShipment(s) {
+    if (cbSelectedShipments.some(function (x) { return x.id === s.id; })) return;
+    if (cbSelectedShipments.length > 0 && cbSelectedShipments[0].vendorId !== s.vendorId) {
+      toast("All invoices in one booking must be for the same store", true);
+      return;
+    }
+    cbSelectedShipments.push(s);
+    cbRenderSelected();
+    cbRecomputeFields();
+    cbUpdateSearchHint();
+    document.getElementById("cbInvoiceSearch").value = "";
+    document.getElementById("cbSearchResults").innerHTML = "";
+  }
+
+  function cbRenderSearchResults(results) {
+    var wrap = document.getElementById("cbSearchResults");
+    wrap.innerHTML = "";
+    var filtered = cbSelectedShipments.length > 0
+      ? results.filter(function (r) { return r.vendorId === cbSelectedShipments[0].vendorId; })
+      : results;
+    filtered.forEach(function (r) {
+      var row = document.createElement("button");
+      row.type = "button";
+      row.className = "cb-result-row";
+      row.textContent = r.invoiceNo + " ";
+      var meta = document.createElement("span");
+      meta.className = "r-meta";
+      meta.textContent = r.vendorName + " · " + formatDate(r.shipDate) + " · " + r.boxes + " box" + (r.boxes === 1 ? "" : "es") + " · " + formatMoney(r.amount);
+      row.appendChild(meta);
+      row.addEventListener("click", function () { cbAddShipment(r); });
+      wrap.appendChild(row);
+    });
+  }
+
+  var cbSearchDebounce = null;
+  document.getElementById("cbInvoiceSearch").addEventListener("input", function () {
+    var q = this.value.trim();
+    clearTimeout(cbSearchDebounce);
+    cbSearchDebounce = setTimeout(function () {
+      getJson("/api/shipments/bookable?q=" + encodeURIComponent(q))
+        .then(cbRenderSearchResults)
+        .catch(function (err) { toast("Search failed: " + err.message, true); });
+    }, 200);
+  });
+
+  document.getElementById("cbCreateBtn").addEventListener("click", function () {
+    var errEl = document.getElementById("cbError");
+    errEl.textContent = "";
+    var boxes = parseInt(document.getElementById("cbBoxes").value, 10);
+    var declaredPrice = parseFloat(document.getElementById("cbDeclaredPrice").value);
+    var weightKg = parseFloat(document.getElementById("cbWeight").value);
+    var pickupDate = document.getElementById("cbPickupDate").value;
+    if (cbSelectedShipments.length === 0) { errEl.textContent = "Select at least one invoice."; return; }
+    if (isNaN(boxes) || boxes < 1) { errEl.textContent = "Number of boxes must be at least 1."; return; }
+    if (isNaN(declaredPrice) || declaredPrice < 0) { errEl.textContent = "Declared price is required."; return; }
+    if (isNaN(weightKg) || weightKg <= 0) { errEl.textContent = "Weight (KG) is required."; return; }
+    if (!pickupDate) { errEl.textContent = "Tentative pickup date is required."; return; }
+
+    postJson("/api/courier-bookings", {
+      shipmentIds: cbSelectedShipments.map(function (s) { return s.id; }),
+      pickupDate: pickupDate, boxes: boxes, declaredPrice: declaredPrice, weightKg: weightKg,
+    }).then(function () {
+      toast("Courier booking created");
+      cbSelectedShipments = [];
+      cbRenderSelected();
+      cbRecomputeFields();
+      cbUpdateSearchHint();
+      document.getElementById("cbWeight").value = "";
+      document.getElementById("cbPickupDate").value = "";
+      cbRenderBookings();
+    }).catch(function (err) { errEl.textContent = err.message; });
+  });
+
+  function cbRenderBookings() {
+    return getJson("/api/courier-bookings").then(function (bookings) {
+      var body = document.getElementById("cbBookingsBody");
+      body.innerHTML = "";
+      document.getElementById("cbBookingsEmpty").style.display = bookings.length ? "none" : "block";
+      bookings.forEach(function (b) {
+        var tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" + escapeHtml(b.pickupDate) + "</td>" +
+          "<td>" + escapeHtml(brandPrefix(b.vendorName)) + "</td>" +
+          "<td>" + escapeHtml(b.vendorName) + "</td>" +
+          "<td class='num-col'>" + b.boxes + "</td>" +
+          "<td class='num-col mono'>" + formatMoney(b.declaredPrice) + "</td>" +
+          "<td class='num-col mono'>" + b.weightKg + "</td>" +
+          "<td class='mono'>" + escapeHtml(b.invoiceNumbers) + "</td>" +
+          "<td></td>";
+        var delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "row-del";
+        delBtn.title = "Delete booking (frees its invoices for rebooking)";
+        delBtn.textContent = "✕";
+        delBtn.addEventListener("click", function () {
+          if (!window.confirm("Delete this courier booking? Its invoice(s) become bookable again.")) return;
+          fetch("/api/courier-bookings/" + b.id, { method: "DELETE" })
+            .then(function (res) { if (!res.ok) throw new Error("Request failed (" + res.status + ")"); return cbRenderBookings(); })
+            .then(function () { toast("Booking deleted"); })
+            .catch(function (err) { toast("Couldn't delete: " + err.message, true); });
+        });
+        tr.lastElementChild.appendChild(delBtn);
+        body.appendChild(tr);
+      });
+    }).catch(function (err) { toast("Couldn't load bookings: " + err.message, true); });
+  }
+
+  function showCourierBookingsView() {
+    document.getElementById("formView").style.display = "none";
+    document.getElementById("printView").style.display = "none";
+    document.getElementById("batchView").style.display = "none";
+    document.getElementById("courierBookingsView").style.display = "block";
+    document.getElementById("tabPackShipments").setAttribute("aria-selected", "false");
+    document.getElementById("tabCourierBookings").setAttribute("aria-selected", "true");
+    if (!cbLoaded) { cbLoaded = true; cbRenderBookings(); }
+  }
+  function showPackShipmentsView() {
+    document.getElementById("courierBookingsView").style.display = "none";
+    document.getElementById("formView").style.display = "block";
+    document.getElementById("tabPackShipments").setAttribute("aria-selected", "true");
+    document.getElementById("tabCourierBookings").setAttribute("aria-selected", "false");
+  }
+  document.getElementById("tabCourierBookings").addEventListener("click", showCourierBookingsView);
+  document.getElementById("tabPackShipments").addEventListener("click", showPackShipmentsView);
 
   // ================= init =================
   function initApp() {
