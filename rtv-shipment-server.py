@@ -12,7 +12,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -125,6 +125,18 @@ def parse_pincode(address):
     # always the actual pincode.
     matches = re.findall(r"\b(\d{3})\s?(\d{3})\b", address or "")
     return "".join(matches[-1]) if matches else ""
+
+
+# The business runs on IST — "today" for a report means the IST calendar
+# day, not the UTC day timestamps happen to be stored in.
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def brand_prefix(name):
+    if not name:
+        return name
+    i = name.find("-")
+    return name[:i] if i != -1 else name
 
 
 def database_url():
@@ -481,6 +493,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.list_courier_bookings()
             if path == "/api/courier-bookings/export":
                 return self.export_courier_bookings_csv()
+            if path == "/api/courier-bookings/report":
+                date_str = (qs.get("date") or [""])[0].strip()
+                return self.get_courier_bookings_report(date_str)
             m = re.match(r"^/api/shipments/(\d+)$", path)
             if m:
                 return self.get_shipment(int(m.group(1)))
@@ -1057,6 +1072,54 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    # Item-level: one row per scanned tracking ID within each invoice
+    # bundled into a booking made on the given IST calendar day (default
+    # today) — a booking's own invoice list is invoice-level, but Marketplace
+    # ID only exists per tracking ID, so this has to join down to that level.
+    def get_courier_bookings_report(self, date_str):
+        if not date_str:
+            date_str = datetime.now(IST).strftime("%Y-%m-%d")
+        try:
+            day = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=IST)
+        except ValueError:
+            raise ApiError(400, "date must be YYYY-MM-DD")
+        start_utc = day.astimezone(timezone.utc).isoformat()
+        end_utc = (day + timedelta(days=1)).astimezone(timezone.utc).isoformat()
+
+        conn = get_db()
+        rows = conn.execute(
+            """
+            SELECT v.name AS vendor_name, s.invoice_no, si.tracking_id, mi.marketplace_order_id,
+                   h.name AS hub_name, s.ship_date, b.id AS booking_id, b.pickup_date
+            FROM courier_bookings b
+            JOIN vendors v ON v.id = b.vendor_id
+            LEFT JOIN hubs h ON h.id = b.hub_id
+            JOIN courier_booking_shipments cbs ON cbs.booking_id = b.id
+            JOIN shipments s ON s.id = cbs.shipment_id
+            JOIN shipment_items si ON si.shipment_id = s.id
+            LEFT JOIN master_items mi ON mi.tracking_id = si.tracking_id
+            WHERE b.created_at >= %s AND b.created_at < %s
+            ORDER BY v.name, s.invoice_no, si.tracking_id
+            """,
+            (start_utc, end_utc),
+        ).fetchall()
+        conn.close()
+        out = [
+            {
+                "brand": brand_prefix(r["vendor_name"]),
+                "vendorName": r["vendor_name"],
+                "invoiceNo": r["invoice_no"],
+                "marketplaceOrderId": r["marketplace_order_id"],
+                "trackingId": r["tracking_id"],
+                "hubName": r["hub_name"],
+                "shipDate": r["ship_date"],
+                "bookingId": r["booking_id"],
+                "pickupDate": r["pickup_date"],
+            }
+            for r in rows
+        ]
+        self.send_json(200, {"date": date_str, "rows": out})
 
 
 def main():
