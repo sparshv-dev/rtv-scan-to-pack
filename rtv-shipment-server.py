@@ -117,6 +117,11 @@ def compose_address(w):
     return addr
 
 
+def parse_pincode(address):
+    m = re.search(r"(\d{6})\s*$", address or "")
+    return m.group(1) if m else ""
+
+
 def database_url():
     url = os.environ.get("DATABASE_URL")
     if not url:
@@ -177,6 +182,7 @@ def init_db():
         );
         ALTER TABLE hubs ADD COLUMN IF NOT EXISTS contact_name TEXT;
         ALTER TABLE hubs ADD COLUMN IF NOT EXISTS contact_email TEXT;
+        ALTER TABLE hubs ADD COLUMN IF NOT EXISTS pincode TEXT;
         CREATE TABLE IF NOT EXISTS vendors (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,
@@ -187,6 +193,7 @@ def init_db():
             contact_phone TEXT
         );
         ALTER TABLE vendors ADD COLUMN IF NOT EXISTS contact_email TEXT;
+        ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pincode TEXT;
         CREATE TABLE IF NOT EXISTS master_items (
             tracking_id TEXT PRIMARY KEY,
             marketplace_order_id TEXT,
@@ -230,6 +237,12 @@ def init_db():
             weight_kg REAL NOT NULL,
             created_at TEXT NOT NULL
         );
+        -- Nullable even though the API requires them for new bookings —
+        -- bookings created before this field existed have nothing to put
+        -- here, and retrofitting NOT NULL would break those old rows.
+        ALTER TABLE courier_bookings ADD COLUMN IF NOT EXISTS hub_id INTEGER REFERENCES hubs(id);
+        ALTER TABLE courier_bookings ADD COLUMN IF NOT EXISTS destination_name TEXT;
+        ALTER TABLE courier_bookings ADD COLUMN IF NOT EXISTS tracking TEXT;
         CREATE TABLE IF NOT EXISTS courier_booking_shipments (
             booking_id INTEGER NOT NULL REFERENCES courier_bookings(id) ON DELETE CASCADE,
             shipment_id INTEGER NOT NULL REFERENCES shipments(id) UNIQUE,
@@ -257,13 +270,25 @@ def init_db():
                 (name, SEED_SHORT_NAMES.get(name, ""), "", address, w["contact_name"], w["contact_phone"], w.get("contact_email", "")),
             )
     conn.commit()
+
+    # Pincode is its own column now (needed for DTDC's Origin/Destination
+    # Pincode columns), but every hub/vendor so far only has it embedded at
+    # the end of the free-text address ("... - 400086"). Backfill from that
+    # pattern once; leaves anything already set untouched.
+    for table in ("hubs", "vendors"):
+        rows = conn.execute(f"SELECT id, address FROM {table} WHERE pincode IS NULL OR pincode = ''").fetchall()
+        for r in rows:
+            pin = parse_pincode(r["address"])
+            if pin:
+                conn.execute(f"UPDATE {table} SET pincode = %s WHERE id = %s", (pin, r["id"]))
+    conn.commit()
     conn.close()
 
 
 def hub_to_dict(row):
     return {
         "id": row["id"], "name": row["name"], "code": row["code"], "address": row["address"], "phone": row["phone"],
-        "contactName": row["contact_name"], "contactEmail": row["contact_email"],
+        "contactName": row["contact_name"], "contactEmail": row["contact_email"], "pincode": row["pincode"],
     }
 
 
@@ -277,7 +302,51 @@ def vendor_to_dict(row):
         "contactName": row["contact_name"],
         "contactPhone": row["contact_phone"],
         "contactEmail": row["contact_email"],
+        "pincode": row["pincode"],
     }
+
+
+# Fixed for every booking (confirmed — DTDC's own bulk-booking template),
+# so these never need a field, data entry, or storage of their own.
+COURIER_BOOKING_CONSTANTS = {
+    "serviceType": "Road",
+    "courierType": "Forward",
+    "contentType": "Clothes",
+    "riskSurcharge": "no risk",
+    "consignmentType": "Forward",
+    "codToPay": "Prepaid",
+}
+
+
+def courier_booking_to_dict(row):
+    hub_name = row["hub_name"]
+    hub_contact_name = row["hub_contact_name"]
+    hub_phone = row["hub_phone"]
+    origin_phone = " - ".join(p for p in (hub_contact_name, hub_phone) if p) or None
+    out = {
+        "id": row["id"],
+        "customerReferenceNumber": row["id"],
+        "pickupDate": row["pickup_date"],
+        "boxes": row["boxes"],
+        "declaredPrice": row["declared_price"],
+        "weightKg": row["weight_kg"],
+        "createdAt": row["created_at"],
+        "vendorName": row["vendor_name"],
+        "warehouseLabel": row["warehouse_label"],
+        "invoiceNumbers": row["invoice_numbers"],
+        "tracking": row["tracking"],
+        "destinationName": row["destination_name"],
+        "destinationPincode": row["vendor_pincode"],
+        "destinationPhone": row["vendor_contact_phone"],
+        "destinationAddress": row["vendor_address"],
+        "hubName": hub_name,
+        "originName": (f"Zilo {hub_name} Warehouse" if hub_name else None),
+        "originPincode": row["hub_pincode"],
+        "originPhone": origin_phone,
+        "originAddress": row["hub_address"],
+    }
+    out.update(COURIER_BOOKING_CONSTANTS)
+    return out
 
 
 def master_to_dict(row):
@@ -377,6 +446,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.list_bookable_shipments(q)
             if path == "/api/courier-bookings":
                 return self.list_courier_bookings()
+            if path == "/api/courier-bookings/export":
+                return self.export_courier_bookings_csv()
             m = re.match(r"^/api/shipments/(\d+)$", path)
             if m:
                 return self.get_shipment(int(m.group(1)))
@@ -424,6 +495,19 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             self.send_json(500, {"error": str(e)})
 
+    def do_PATCH(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        try:
+            m = re.match(r"^/api/courier-bookings/(\d+)$", path)
+            if m:
+                return self.update_courier_booking_tracking(int(m.group(1)))
+            return self.send_json(404, {"error": "Unknown endpoint"})
+        except ApiError as e:
+            self.send_json(e.status, {"error": e.message})
+        except Exception as e:  # noqa: BLE001
+            self.send_json(500, {"error": str(e)})
+
     # ---------- hubs ----------
     def list_hubs(self):
         conn = get_db()
@@ -439,11 +523,12 @@ class Handler(BaseHTTPRequestHandler):
         code = (body.get("code") or "").strip().upper() or slugify_code(name)
         contact_name = (body.get("contactName") or "").strip()
         contact_email = (body.get("contactEmail") or "").strip()
+        pincode = (body.get("pincode") or "").strip() or parse_pincode(address)
         conn = get_db()
         row = conn.execute(
-            "INSERT INTO hubs (name, code, address, phone, contact_name, contact_email) "
-            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
-            (name, code, address, phone, contact_name, contact_email),
+            "INSERT INTO hubs (name, code, address, phone, contact_name, contact_email, pincode) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *",
+            (name, code, address, phone, contact_name, contact_email, pincode),
         ).fetchone()
         conn.commit()
         conn.close()
@@ -465,15 +550,16 @@ class Handler(BaseHTTPRequestHandler):
         contact_name = (body.get("contactName") or "").strip()
         contact_phone = (body.get("contactPhone") or "").strip()
         contact_email = (body.get("contactEmail") or "").strip()
+        pincode = (body.get("pincode") or "").strip() or parse_pincode(address)
         conn = get_db()
         existing = conn.execute("SELECT * FROM vendors WHERE name = %s", (name,)).fetchone()
         if existing:
             conn.close()
             raise ApiError(409, f"A warehouse for '{name}' already exists")
         row = conn.execute(
-            "INSERT INTO vendors (name, short_name, warehouse_label, address, contact_name, contact_phone, contact_email) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *",
-            (name, short_name, warehouse_label, address, contact_name, contact_phone, contact_email),
+            "INSERT INTO vendors (name, short_name, warehouse_label, address, contact_name, contact_phone, contact_email, pincode) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
+            (name, short_name, warehouse_label, address, contact_name, contact_phone, contact_email, pincode),
         ).fetchone()
         conn.commit()
         conn.close()
@@ -730,10 +816,11 @@ class Handler(BaseHTTPRequestHandler):
     def list_bookable_shipments(self, q):
         conn = get_db()
         sql = (
-            "SELECT s.id, s.invoice_no, s.ship_date, s.vendor_id, v.name AS vendor_name, v.warehouse_label, "
+            "SELECT s.id, s.invoice_no, s.ship_date, s.vendor_id, s.hub_id, "
+            "v.name AS vendor_name, v.warehouse_label, h.name AS hub_name, "
             "(SELECT COUNT(DISTINCT box_no) FROM shipment_items WHERE shipment_id = s.id) AS boxes, "
             "(SELECT COALESCE(SUM(qty * value), 0) FROM shipment_items WHERE shipment_id = s.id) AS amount "
-            "FROM shipments s JOIN vendors v ON v.id = s.vendor_id "
+            "FROM shipments s JOIN vendors v ON v.id = s.vendor_id JOIN hubs h ON h.id = s.hub_id "
             "WHERE s.id NOT IN (SELECT shipment_id FROM courier_booking_shipments)"
         )
         params = []
@@ -752,6 +839,8 @@ class Handler(BaseHTTPRequestHandler):
                 "vendorId": r["vendor_id"],
                 "vendorName": r["vendor_name"],
                 "warehouseLabel": r["warehouse_label"],
+                "hubId": r["hub_id"],
+                "hubName": r["hub_name"],
                 "boxes": r["boxes"],
                 "amount": r["amount"],
             }
@@ -764,32 +853,24 @@ class Handler(BaseHTTPRequestHandler):
         rows = conn.execute(
             """
             SELECT b.id, b.pickup_date, b.boxes, b.declared_price, b.weight_kg, b.created_at,
-                   v.name AS vendor_name, v.warehouse_label,
+                   b.destination_name, b.tracking,
+                   v.name AS vendor_name, v.warehouse_label, v.pincode AS vendor_pincode,
+                   v.contact_phone AS vendor_contact_phone, v.address AS vendor_address,
+                   h.name AS hub_name, h.pincode AS hub_pincode, h.contact_name AS hub_contact_name,
+                   h.phone AS hub_phone, h.address AS hub_address,
                    string_agg(s.invoice_no, ', ' ORDER BY s.invoice_no) AS invoice_numbers
             FROM courier_bookings b
             JOIN vendors v ON v.id = b.vendor_id
+            LEFT JOIN hubs h ON h.id = b.hub_id
             JOIN courier_booking_shipments cbs ON cbs.booking_id = b.id
             JOIN shipments s ON s.id = cbs.shipment_id
-            GROUP BY b.id, v.name, v.warehouse_label
+            GROUP BY b.id, v.name, v.warehouse_label, v.pincode, v.contact_phone, v.address,
+                     h.name, h.pincode, h.contact_name, h.phone, h.address
             ORDER BY b.id DESC
             """
         ).fetchall()
         conn.close()
-        out = [
-            {
-                "id": r["id"],
-                "pickupDate": r["pickup_date"],
-                "boxes": r["boxes"],
-                "declaredPrice": r["declared_price"],
-                "weightKg": r["weight_kg"],
-                "createdAt": r["created_at"],
-                "vendorName": r["vendor_name"],
-                "warehouseLabel": r["warehouse_label"],
-                "invoiceNumbers": r["invoice_numbers"],
-            }
-            for r in rows
-        ]
-        self.send_json(200, out)
+        self.send_json(200, [courier_booking_to_dict(r) for r in rows])
 
     def create_courier_booking(self):
         body = self.read_json_body()
@@ -801,6 +882,7 @@ class Handler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             raise ApiError(400, "shipmentIds must be numbers")
         pickup_date = require_str(body, "pickupDate")
+        destination_name = require_str(body, "destinationName")
         try:
             boxes = int(body.get("boxes"))
             declared_price = float(body.get("declaredPrice"))
@@ -823,6 +905,11 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
             raise ApiError(400, "All invoices in one booking must be for the same store")
         vendor_id = vendor_ids.pop()
+        hub_ids = set(r["hub_id"] for r in rows)
+        if len(hub_ids) > 1:
+            conn.close()
+            raise ApiError(400, "All invoices in one booking must be picked up from the same hub")
+        hub_id = hub_ids.pop()
 
         already_booked = conn.execute(
             f"SELECT shipment_id FROM courier_booking_shipments WHERE shipment_id IN ({placeholders})",
@@ -834,9 +921,9 @@ class Handler(BaseHTTPRequestHandler):
 
         created_at = datetime.now(timezone.utc).isoformat()
         booking_row = conn.execute(
-            "INSERT INTO courier_bookings (vendor_id, pickup_date, boxes, declared_price, weight_kg, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-            (vendor_id, pickup_date, boxes, declared_price, weight_kg, created_at),
+            "INSERT INTO courier_bookings (vendor_id, hub_id, destination_name, pickup_date, boxes, declared_price, weight_kg, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (vendor_id, hub_id, destination_name, pickup_date, boxes, declared_price, weight_kg, created_at),
         ).fetchone()
         booking_id = booking_row["id"]
         conn.executemany(
@@ -857,6 +944,86 @@ class Handler(BaseHTTPRequestHandler):
         conn.commit()
         conn.close()
         self.send_json(200, {"id": booking_id})
+
+    def update_courier_booking_tracking(self, booking_id):
+        body = self.read_json_body()
+        tracking = (body.get("tracking") or "").strip()
+        conn = get_db()
+        row = conn.execute("SELECT id FROM courier_bookings WHERE id = %s", (booking_id,)).fetchone()
+        if not row:
+            conn.close()
+            raise ApiError(404, "Booking not found")
+        conn.execute("UPDATE courier_bookings SET tracking = %s WHERE id = %s", (tracking, booking_id))
+        conn.commit()
+        conn.close()
+        self.send_json(200, {"id": booking_id, "tracking": tracking})
+
+    # Column order matches DTDC's own bulk-booking template exactly, so this
+    # file can go straight to them without reshuffling anything.
+    COURIER_EXPORT_COLUMNS = [
+        ("customerReferenceNumber", "Customer Reference Number"),
+        ("serviceType", "Service Type"),
+        ("courierType", "Courier Type"),
+        ("declaredPrice", "Declared Price (non-document)"),
+        ("boxes", "Number of Pieces (non-document)"),
+        ("weightKg", "Weight(KG) (non-document)"),
+        ("originPincode", "Origin Pincode"),
+        ("originName", "Origin Name"),
+        ("originPhone", "Origin Phone"),
+        ("originAddress", "Origin Address Line 1"),
+        ("destinationPincode", "Destination Pincode"),
+        ("destinationName", "Destination Name"),
+        ("destinationPhone", "Destination Phone"),
+        ("destinationAddress", "Destination Address Line 1"),
+        ("contentType", "Content Type"),
+        ("riskSurcharge", "Risk Surcharge (YES/NO) (non-document)"),
+        ("consignmentType", "Consignment Type"),
+        ("tracking", "Tracking"),
+        ("codToPay", "COD/To Pay"),
+        ("pickupDate", "Pick Date (Tentative)"),
+    ]
+
+    def export_courier_bookings_csv(self):
+        conn = get_db()
+        rows = conn.execute(
+            """
+            SELECT b.id, b.pickup_date, b.boxes, b.declared_price, b.weight_kg, b.created_at,
+                   b.destination_name, b.tracking,
+                   v.name AS vendor_name, v.warehouse_label, v.pincode AS vendor_pincode,
+                   v.contact_phone AS vendor_contact_phone, v.address AS vendor_address,
+                   h.name AS hub_name, h.pincode AS hub_pincode, h.contact_name AS hub_contact_name,
+                   h.phone AS hub_phone, h.address AS hub_address,
+                   string_agg(s.invoice_no, ', ' ORDER BY s.invoice_no) AS invoice_numbers
+            FROM courier_bookings b
+            JOIN vendors v ON v.id = b.vendor_id
+            LEFT JOIN hubs h ON h.id = b.hub_id
+            JOIN courier_booking_shipments cbs ON cbs.booking_id = b.id
+            JOIN shipments s ON s.id = cbs.shipment_id
+            GROUP BY b.id, v.name, v.warehouse_label, v.pincode, v.contact_phone, v.address,
+                     h.name, h.pincode, h.contact_name, h.phone, h.address
+            ORDER BY b.id ASC
+            """
+        ).fetchall()
+        conn.close()
+
+        def csv_field(v):
+            s = "" if v is None else str(v)
+            if any(c in s for c in (',', '"', '\n')):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = [",".join(csv_field(label) for _, label in self.COURIER_EXPORT_COLUMNS)]
+        for r in rows:
+            d = courier_booking_to_dict(r)
+            lines.append(",".join(csv_field(d.get(key)) for key, _ in self.COURIER_EXPORT_COLUMNS))
+        body = ("\r\n".join(lines) + "\r\n").encode("utf-8")
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/csv; charset=utf-8")
+        self.send_header("Content-Disposition", "attachment; filename=dtdc-courier-bookings.csv")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 def main():
