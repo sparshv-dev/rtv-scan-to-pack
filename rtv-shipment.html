@@ -251,6 +251,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <div class="field"><label>Phone</label><input id="nh-phone" placeholder="+91 22 6801 4400"></div>
       <div class="field"><label>Contact name</label><input id="nh-contactName" placeholder="Aakash Narwade"></div>
       <div class="field"><label>Contact email</label><input id="nh-contactEmail" type="email" placeholder="zilo_ghatkopar_ds@zilo.one"></div>
+      <div class="field"><label>Pincode</label><input id="nh-pincode" placeholder="400086 (auto-detected from address if left blank)"></div>
       <div class="actions">
         <button type="button" class="btn small" id="saveHub">Save hub</button>
         <button type="button" class="btn small secondary" id="cancelHub">Cancel</button>
@@ -285,6 +286,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <div class="field span-2"><label>Address</label><input id="nb-address" placeholder="WH No. 4, Omni Return QC Center, Bhiwandi, Thane, Maharashtra 421101"></div>
       <div class="field"><label>Contact phone</label><input id="nb-contactPhone" placeholder="+91 98200 44117"></div>
       <div class="field"><label>Contact email</label><input id="nb-contactEmail" type="email" placeholder="warehouse@vendor.com"></div>
+      <div class="field"><label>Pincode</label><input id="nb-pincode" placeholder="400086 (auto-detected from address if left blank)"></div>
       <div class="actions">
         <button type="button" class="btn small" id="saveBrand">Save brand</button>
         <button type="button" class="btn small secondary" id="cancelBrand">Cancel</button>
@@ -525,13 +527,14 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       phone: document.getElementById("nh-phone").value.trim(),
       contactName: document.getElementById("nh-contactName").value.trim(),
       contactEmail: document.getElementById("nh-contactEmail").value.trim(),
+      pincode: document.getElementById("nh-pincode").value.trim(),
     })
       .then(function (hub) {
         state.hubs.push(hub);
         refreshHubSelect();
         document.getElementById("hubSelect").value = hub.id;
         document.getElementById("newHubForm").classList.remove("is-open");
-        ["nh-name", "nh-code", "nh-address", "nh-phone", "nh-contactName", "nh-contactEmail"].forEach(function (id) { document.getElementById(id).value = ""; });
+        ["nh-name", "nh-code", "nh-address", "nh-phone", "nh-contactName", "nh-contactEmail", "nh-pincode"].forEach(function (id) { document.getElementById(id).value = ""; });
         toast("Hub saved: " + hub.name);
       })
       .catch(function (err) { toast("Couldn't save hub: " + err.message, true); });
@@ -1842,11 +1845,12 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       shortName: document.getElementById("nb-shortName").value.trim(),
       contactPhone: document.getElementById("nb-contactPhone").value.trim(),
       contactEmail: document.getElementById("nb-contactEmail").value.trim(),
+      pincode: document.getElementById("nb-pincode").value.trim(),
     }).then(function (vendor) {
       state.vendors.push(vendor);
       selectBoxVendor(vendor);
       document.getElementById("newBrandForm").classList.remove("is-open");
-      ["nb-name", "nb-shortName", "nb-address", "nb-contactPhone", "nb-contactEmail"].forEach(function (id) { document.getElementById(id).value = ""; });
+      ["nb-name", "nb-shortName", "nb-address", "nb-contactPhone", "nb-contactEmail", "nb-pincode"].forEach(function (id) { document.getElementById(id).value = ""; });
       toast("Brand saved: " + vendor.name);
     }).catch(function (err) { toast("Couldn't save brand: " + err.message, true); });
   });
