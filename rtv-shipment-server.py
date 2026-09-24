@@ -265,6 +265,11 @@ def init_db():
             shipment_id INTEGER NOT NULL REFERENCES shipments(id) UNIQUE,
             PRIMARY KEY (booking_id, shipment_id)
         );
+        -- Postgres auto-indexes primary/unique/FK-target columns but not
+        -- plain FK columns or lookup keys — these back the invoice/booking
+        -- lookup and the daily report, both of which join through them.
+        CREATE INDEX IF NOT EXISTS idx_shipment_items_shipment_id ON shipment_items(shipment_id);
+        CREATE INDEX IF NOT EXISTS idx_shipment_items_tracking_id ON shipment_items(tracking_id);
         """
     )
     conn.commit()
@@ -496,6 +501,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/courier-bookings/report":
                 date_str = (qs.get("date") or [""])[0].strip()
                 return self.get_courier_bookings_report(date_str)
+            if path == "/api/courier-lookup":
+                q = (qs.get("q") or [""])[0].strip()
+                return self.courier_lookup(q)
             m = re.match(r"^/api/shipments/(\d+)$", path)
             if m:
                 return self.get_shipment(int(m.group(1)))
@@ -537,6 +545,9 @@ class Handler(BaseHTTPRequestHandler):
             m = re.match(r"^/api/courier-bookings/(\d+)$", path)
             if m:
                 return self.delete_courier_booking(int(m.group(1)))
+            m = re.match(r"^/api/hubs/(\d+)$", path)
+            if m:
+                return self.delete_hub(int(m.group(1)))
             return self.send_json(404, {"error": "Unknown endpoint"})
         except ApiError as e:
             self.send_json(e.status, {"error": e.message})
@@ -581,6 +592,23 @@ class Handler(BaseHTTPRequestHandler):
         conn.commit()
         conn.close()
         self.send_json(201, hub_to_dict(row))
+
+    def delete_hub(self, hub_id):
+        conn = get_db()
+        row = conn.execute("SELECT id FROM hubs WHERE id = %s", (hub_id,)).fetchone()
+        if not row:
+            conn.close()
+            raise ApiError(404, "Hub not found")
+        in_use = conn.execute(
+            "SELECT COUNT(*) AS count FROM shipments WHERE hub_id = %s", (hub_id,)
+        ).fetchone()["count"]
+        if in_use:
+            conn.close()
+            raise ApiError(409, f"Can't delete — {in_use} shipment(s) still reference this hub")
+        conn.execute("DELETE FROM hubs WHERE id = %s", (hub_id,))
+        conn.commit()
+        conn.close()
+        self.send_json(200, {"id": hub_id})
 
     # ---------- vendors ----------
     def list_vendors(self):
@@ -1120,6 +1148,102 @@ class Handler(BaseHTTPRequestHandler):
             for r in rows
         ]
         self.send_json(200, {"date": date_str, "rows": out})
+
+    # Single entry point for "give me everything about X" — X can be a
+    # courier booking id (numeric) or an invoice number. Works even for an
+    # invoice that hasn't been courier-booked yet (booking comes back null).
+    def courier_lookup(self, q):
+        q = (q or "").strip()
+        if not q:
+            raise ApiError(400, "q is required")
+        conn = get_db()
+
+        booking_id = None
+        if q.isdigit():
+            row = conn.execute("SELECT id FROM courier_bookings WHERE id = %s", (int(q),)).fetchone()
+            if row:
+                booking_id = row["id"]
+
+        if booking_id is None:
+            srow = conn.execute("SELECT id FROM shipments WHERE invoice_no = %s", (q,)).fetchone()
+            if not srow:
+                conn.close()
+                raise ApiError(404, f"No courier booking or invoice found for '{q}'")
+            brow = conn.execute(
+                "SELECT booking_id FROM courier_booking_shipments WHERE shipment_id = %s", (srow["id"],)
+            ).fetchone()
+            booking_id = brow["booking_id"] if brow else None
+
+        booking = None
+        if booking_id is not None:
+            brow = conn.execute(
+                """
+                SELECT b.id, b.pickup_date, b.boxes, b.declared_price, b.weight_kg, b.created_at,
+                       b.destination_name, b.tracking,
+                       v.name AS vendor_name, v.warehouse_label, v.pincode AS vendor_pincode,
+                       v.contact_phone AS vendor_contact_phone, v.address AS vendor_address,
+                       h.name AS hub_name, h.pincode AS hub_pincode, h.contact_name AS hub_contact_name,
+                       h.phone AS hub_phone, h.address AS hub_address,
+                       string_agg(s.invoice_no, ', ' ORDER BY s.invoice_no) AS invoice_numbers
+                FROM courier_bookings b
+                JOIN vendors v ON v.id = b.vendor_id
+                LEFT JOIN hubs h ON h.id = b.hub_id
+                JOIN courier_booking_shipments cbs ON cbs.booking_id = b.id
+                JOIN shipments s ON s.id = cbs.shipment_id
+                WHERE b.id = %s
+                GROUP BY b.id, v.name, v.warehouse_label, v.pincode, v.contact_phone, v.address,
+                         h.name, h.pincode, h.contact_name, h.phone, h.address
+                """,
+                (booking_id,),
+            ).fetchone()
+            booking = courier_booking_to_dict(brow)
+            shipment_rows = conn.execute(
+                "SELECT s.id, s.invoice_no, s.ship_date, s.hub_id, s.vendor_id "
+                "FROM shipments s JOIN courier_booking_shipments cbs ON cbs.shipment_id = s.id "
+                "WHERE cbs.booking_id = %s ORDER BY s.invoice_no",
+                (booking_id,),
+            ).fetchall()
+        else:
+            shipment_rows = conn.execute(
+                "SELECT id, invoice_no, ship_date, hub_id, vendor_id FROM shipments WHERE invoice_no = %s", (q,)
+            ).fetchall()
+
+        invoices = []
+        for srow in shipment_rows:
+            hub = conn.execute("SELECT * FROM hubs WHERE id = %s", (srow["hub_id"],)).fetchone()
+            vendor = conn.execute("SELECT * FROM vendors WHERE id = %s", (srow["vendor_id"],)).fetchone()
+            items = conn.execute(
+                """
+                SELECT si.tracking_id, si.value, si.qty, si.box_no, mi.marketplace_order_id,
+                       mi.seller_name, mi.return_id, mi.rtv_shipment_status
+                FROM shipment_items si
+                LEFT JOIN master_items mi ON mi.tracking_id = si.tracking_id
+                WHERE si.shipment_id = %s
+                ORDER BY si.box_no, si.tracking_id
+                """,
+                (srow["id"],),
+            ).fetchall()
+            invoices.append({
+                "invoiceNo": srow["invoice_no"],
+                "shipDate": srow["ship_date"],
+                "hub": hub_to_dict(hub) if hub else None,
+                "vendor": vendor_to_dict(vendor) if vendor else None,
+                "items": [
+                    {
+                        "trackingId": it["tracking_id"],
+                        "value": it["value"],
+                        "qty": it["qty"],
+                        "boxNo": it["box_no"],
+                        "marketplaceOrderId": it["marketplace_order_id"],
+                        "sellerName": it["seller_name"],
+                        "returnId": it["return_id"],
+                        "rtvShipmentStatus": it["rtv_shipment_status"],
+                    }
+                    for it in items
+                ],
+            })
+        conn.close()
+        self.send_json(200, {"booking": booking, "invoices": invoices})
 
 
 def main():

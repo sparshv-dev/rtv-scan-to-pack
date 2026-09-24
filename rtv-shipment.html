@@ -392,6 +392,20 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   </div>
 
   <div class="card">
+    <h2>Look up</h2>
+    <p class="hint">Type a courier booking ID or an invoice number to pull everything known about it — booking details if it's been booked, plus every scanned item, value, and Marketplace ID.</p>
+    <div class="field-grid">
+      <div class="field span-2">
+        <label for="clQuery">Booking ID or invoice number</label>
+        <input id="clQuery" placeholder="e.g. 4 or RTV-GHK-20260911-001" autocomplete="off">
+      </div>
+    </div>
+    <button type="button" class="btn secondary" id="clSearchBtn" style="margin-top:10px;">Look up</button>
+    <p class="field-error" id="clError"></p>
+    <div id="clResult" style="margin-top:14px;"></div>
+  </div>
+
+  <div class="card">
     <h2>New booking</h2>
     <p class="hint">Search and pick one or more invoices going to the same store, then fill in the pickup details for DTDC. Once an invoice is used here, it won't show up again for a future booking.</p>
 
@@ -2287,6 +2301,75 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       });
     }).catch(function (err) { toast("Couldn't load bookings: " + err.message, true); });
   }
+
+  // ---- look up: everything known about one booking ID or invoice number ----
+  function clRenderResult(data) {
+    var wrap = document.getElementById("clResult");
+    wrap.innerHTML = "";
+
+    if (data.booking) {
+      var b = data.booking;
+      var bookingDiv = document.createElement("div");
+      bookingDiv.innerHTML =
+        "<p style='font-weight:700; margin-bottom:6px;'>Courier Booking #" + b.id + "</p>" +
+        "<p class='hint' style='margin-bottom:10px;'>" +
+          escapeHtml(b.vendorName) + " · Pickup " + escapeHtml(b.pickupDate) + " · " + b.boxes + " box" + (b.boxes === 1 ? "" : "es") +
+          " · " + formatMoney(b.declaredPrice) + " · " + b.weightKg + " kg" +
+          (b.tracking ? " · Tracking: " + escapeHtml(b.tracking) : " · Tracking: not yet provided") +
+        "</p>";
+      wrap.appendChild(bookingDiv);
+    } else {
+      var noBooking = document.createElement("p");
+      noBooking.className = "empty-state";
+      noBooking.textContent = "Not part of any courier booking yet.";
+      wrap.appendChild(noBooking);
+    }
+
+    data.invoices.forEach(function (inv) {
+      var invDiv = document.createElement("div");
+      invDiv.style.marginTop = "12px";
+      invDiv.innerHTML =
+        "<p style='font-weight:700; margin-bottom:2px;'>" + escapeHtml(inv.invoiceNo) + "</p>" +
+        "<p class='hint' style='margin-bottom:8px;'>" +
+          (inv.vendor ? escapeHtml(inv.vendor.name) : "") + " · from " + (inv.hub ? escapeHtml(inv.hub.name) : "") + " · Ship date " + escapeHtml(inv.shipDate) +
+        "</p>";
+      var tableWrap = document.createElement("div");
+      tableWrap.className = "table-wrap";
+      var table = document.createElement("table");
+      table.className = "data-table";
+      table.innerHTML = "<thead><tr><th>Tracking</th><th>Marketplace ID</th><th class='num-col'>Value</th><th class='num-col'>Qty</th><th class='num-col'>Box</th></tr></thead>";
+      var tbody = document.createElement("tbody");
+      inv.items.forEach(function (it) {
+        var tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td class='mono'>" + escapeHtml(it.trackingId) + "</td>" +
+          "<td class='mono'>" + escapeHtml(it.marketplaceOrderId || "—") + "</td>" +
+          "<td class='num-col mono'>" + formatMoney(it.value) + "</td>" +
+          "<td class='num-col'>" + it.qty + "</td>" +
+          "<td class='num-col'>" + it.boxNo + "</td>";
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+      invDiv.appendChild(tableWrap);
+      wrap.appendChild(invDiv);
+    });
+  }
+
+  function clRunLookup() {
+    var q = document.getElementById("clQuery").value.trim();
+    var errEl = document.getElementById("clError");
+    errEl.textContent = "";
+    document.getElementById("clResult").innerHTML = "";
+    if (!q) { errEl.textContent = "Type a booking ID or invoice number."; return; }
+    getJson("/api/courier-lookup?q=" + encodeURIComponent(q))
+      .then(clRenderResult)
+      .catch(function (err) { errEl.textContent = err.message; });
+  }
+  document.getElementById("clSearchBtn").addEventListener("click", clRunLookup);
+  document.getElementById("clQuery").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); clRunLookup(); }
+  });
 
   function showCourierBookingsView() {
     document.getElementById("formView").style.display = "none";
