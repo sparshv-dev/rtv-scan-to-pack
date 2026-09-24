@@ -287,6 +287,23 @@ def init_db():
             if pin:
                 conn.execute(f"UPDATE {table} SET pincode = %s WHERE id = %s", (pin, r["id"]))
     conn.commit()
+
+    # Bookings created before hub_id existed on courier_bookings have no
+    # Origin fields to show — but the shipments linked to them still know
+    # their own hub, so recover it from there instead of leaving it blank.
+    orphaned = conn.execute(
+        """
+        SELECT b.id AS booking_id, s.hub_id
+        FROM courier_bookings b
+        JOIN courier_booking_shipments cbs ON cbs.booking_id = b.id
+        JOIN shipments s ON s.id = cbs.shipment_id
+        WHERE b.hub_id IS NULL
+        GROUP BY b.id, s.hub_id
+        """
+    ).fetchall()
+    for r in orphaned:
+        conn.execute("UPDATE courier_bookings SET hub_id = %s WHERE id = %s", (r["hub_id"], r["booking_id"]))
+    conn.commit()
     conn.close()
 
 
