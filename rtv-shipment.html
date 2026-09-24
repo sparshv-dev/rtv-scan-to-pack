@@ -1709,10 +1709,10 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
           row.type = "button";
           row.className = "brand-location-row";
           row.textContent = v.name;
-          if (v.warehouseLabel) {
+          if (v.address) {
             var meta = document.createElement("span");
             meta.className = "loc-meta";
-            meta.textContent = v.warehouseLabel;
+            meta.textContent = v.address;
             row.appendChild(meta);
           }
           row.addEventListener("click", function () { selectBoxVendor(v); closeBoxVendorPicker(); });
