@@ -175,6 +175,8 @@ def init_db():
             address TEXT NOT NULL,
             phone TEXT
         );
+        ALTER TABLE hubs ADD COLUMN IF NOT EXISTS contact_name TEXT;
+        ALTER TABLE hubs ADD COLUMN IF NOT EXISTS contact_email TEXT;
         CREATE TABLE IF NOT EXISTS vendors (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,
@@ -259,7 +261,10 @@ def init_db():
 
 
 def hub_to_dict(row):
-    return {"id": row["id"], "name": row["name"], "code": row["code"], "address": row["address"], "phone": row["phone"]}
+    return {
+        "id": row["id"], "name": row["name"], "code": row["code"], "address": row["address"], "phone": row["phone"],
+        "contactName": row["contact_name"], "contactEmail": row["contact_email"],
+    }
 
 
 def vendor_to_dict(row):
@@ -432,10 +437,13 @@ class Handler(BaseHTTPRequestHandler):
         address = require_str(body, "address")
         phone = (body.get("phone") or "").strip()
         code = (body.get("code") or "").strip().upper() or slugify_code(name)
+        contact_name = (body.get("contactName") or "").strip()
+        contact_email = (body.get("contactEmail") or "").strip()
         conn = get_db()
         row = conn.execute(
-            "INSERT INTO hubs (name, code, address, phone) VALUES (%s, %s, %s, %s) RETURNING *",
-            (name, code, address, phone),
+            "INSERT INTO hubs (name, code, address, phone, contact_name, contact_email) "
+            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
+            (name, code, address, phone, contact_name, contact_email),
         ).fetchone()
         conn.commit()
         conn.close()

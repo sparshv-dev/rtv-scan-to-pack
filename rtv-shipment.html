@@ -249,6 +249,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <div class="field"><label>Short code</label><input id="nh-code" placeholder="GHK" maxlength="6"></div>
       <div class="field span-2"><label>Address</label><input id="nh-address" placeholder="Unit 4, Everest Industrial Estate, LBS Marg, Ghatkopar (W), Mumbai 400086"></div>
       <div class="field"><label>Phone</label><input id="nh-phone" placeholder="+91 22 6801 4400"></div>
+      <div class="field"><label>Contact name</label><input id="nh-contactName" placeholder="Aakash Narwade"></div>
+      <div class="field"><label>Contact email</label><input id="nh-contactEmail" type="email" placeholder="zilo_ghatkopar_ds@zilo.one"></div>
       <div class="actions">
         <button type="button" class="btn small" id="saveHub">Save hub</button>
         <button type="button" class="btn small secondary" id="cancelHub">Cancel</button>
@@ -513,13 +515,18 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     var address = document.getElementById("nh-address").value.trim();
     if (!name || !address) { toast("Hub name and address are required", true); return; }
     var code = document.getElementById("nh-code").value.trim().toUpperCase() || name.replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase() || "HUB";
-    postJson("/api/hubs", { name: name, address: address, code: code, phone: document.getElementById("nh-phone").value.trim() })
+    postJson("/api/hubs", {
+      name: name, address: address, code: code,
+      phone: document.getElementById("nh-phone").value.trim(),
+      contactName: document.getElementById("nh-contactName").value.trim(),
+      contactEmail: document.getElementById("nh-contactEmail").value.trim(),
+    })
       .then(function (hub) {
         state.hubs.push(hub);
         refreshHubSelect();
         document.getElementById("hubSelect").value = hub.id;
         document.getElementById("newHubForm").classList.remove("is-open");
-        ["nh-name", "nh-code", "nh-address", "nh-phone"].forEach(function (id) { document.getElementById(id).value = ""; });
+        ["nh-name", "nh-code", "nh-address", "nh-phone", "nh-contactName", "nh-contactEmail"].forEach(function (id) { document.getElementById(id).value = ""; });
         toast("Hub saved: " + hub.name);
       })
       .catch(function (err) { toast("Couldn't save hub: " + err.message, true); });
