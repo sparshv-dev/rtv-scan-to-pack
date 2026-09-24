@@ -504,6 +504,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/courier-lookup":
                 q = (qs.get("q") or [""])[0].strip()
                 return self.courier_lookup(q)
+            m = re.match(r"^/api/courier-bookings/(\d+)/report$", path)
+            if m:
+                return self.get_courier_booking_report_csv(int(m.group(1)))
             m = re.match(r"^/api/shipments/(\d+)$", path)
             if m:
                 return self.get_shipment(int(m.group(1)))
@@ -1105,35 +1108,37 @@ class Handler(BaseHTTPRequestHandler):
     # bundled into a booking made on the given IST calendar day (default
     # today) — a booking's own invoice list is invoice-level, but Marketplace
     # ID only exists per tracking ID, so this has to join down to that level.
-    def get_courier_bookings_report(self, date_str):
-        if not date_str:
-            date_str = datetime.now(IST).strftime("%Y-%m-%d")
-        try:
-            day = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=IST)
-        except ValueError:
-            raise ApiError(400, "date must be YYYY-MM-DD")
-        start_utc = day.astimezone(timezone.utc).isoformat()
-        end_utc = (day + timedelta(days=1)).astimezone(timezone.utc).isoformat()
+    # Shared by the "today" report, the per-booking report, and its CSV
+    # download — one row per scanned tracking ID, since Marketplace ID only
+    # exists at that granularity (a booking's own invoice list is coarser).
+    REPORT_ROW_SQL = (
+        "SELECT v.name AS vendor_name, s.invoice_no, si.tracking_id, mi.marketplace_order_id, "
+        "       h.name AS hub_name, s.ship_date, b.id AS booking_id, b.pickup_date "
+        "FROM courier_bookings b "
+        "JOIN vendors v ON v.id = b.vendor_id "
+        "LEFT JOIN hubs h ON h.id = b.hub_id "
+        "JOIN courier_booking_shipments cbs ON cbs.booking_id = b.id "
+        "JOIN shipments s ON s.id = cbs.shipment_id "
+        "JOIN shipment_items si ON si.shipment_id = s.id "
+        "LEFT JOIN master_items mi ON mi.tracking_id = si.tracking_id "
+    )
+    REPORT_COLUMNS = [
+        ("brand", "Brand"),
+        ("invoiceNo", "Invoice Number"),
+        ("marketplaceOrderId", "Marketplace ID"),
+        ("trackingId", "Tracking Number"),
+        ("hubName", "Hub Location"),
+        ("shipDate", "Ship Date"),
+    ]
 
+    def fetch_report_rows(self, where_sql, params):
         conn = get_db()
         rows = conn.execute(
-            """
-            SELECT v.name AS vendor_name, s.invoice_no, si.tracking_id, mi.marketplace_order_id,
-                   h.name AS hub_name, s.ship_date, b.id AS booking_id, b.pickup_date
-            FROM courier_bookings b
-            JOIN vendors v ON v.id = b.vendor_id
-            LEFT JOIN hubs h ON h.id = b.hub_id
-            JOIN courier_booking_shipments cbs ON cbs.booking_id = b.id
-            JOIN shipments s ON s.id = cbs.shipment_id
-            JOIN shipment_items si ON si.shipment_id = s.id
-            LEFT JOIN master_items mi ON mi.tracking_id = si.tracking_id
-            WHERE b.created_at >= %s AND b.created_at < %s
-            ORDER BY v.name, s.invoice_no, si.tracking_id
-            """,
-            (start_utc, end_utc),
+            self.REPORT_ROW_SQL + where_sql + " ORDER BY v.name, s.invoice_no, si.tracking_id",
+            params,
         ).fetchall()
         conn.close()
-        out = [
+        return [
             {
                 "brand": brand_prefix(r["vendor_name"]),
                 "vendorName": r["vendor_name"],
@@ -1147,7 +1152,43 @@ class Handler(BaseHTTPRequestHandler):
             }
             for r in rows
         ]
+
+    @staticmethod
+    def csv_escape(v):
+        s = "" if v is None else str(v)
+        if any(c in s for c in (',', '"', '\n')):
+            s = '"' + s.replace('"', '""') + '"'
+        return s
+
+    def send_report_csv(self, out, filename):
+        lines = [",".join(self.csv_escape(label) for _, label in self.REPORT_COLUMNS)]
+        for r in out:
+            lines.append(",".join(self.csv_escape(r.get(key)) for key, _ in self.REPORT_COLUMNS))
+        body = ("\r\n".join(lines) + "\r\n").encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/csv; charset=utf-8")
+        self.send_header("Content-Disposition", f"attachment; filename={filename}")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def get_courier_bookings_report(self, date_str):
+        if not date_str:
+            date_str = datetime.now(IST).strftime("%Y-%m-%d")
+        try:
+            day = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=IST)
+        except ValueError:
+            raise ApiError(400, "date must be YYYY-MM-DD")
+        start_utc = day.astimezone(timezone.utc).isoformat()
+        end_utc = (day + timedelta(days=1)).astimezone(timezone.utc).isoformat()
+        out = self.fetch_report_rows("WHERE b.created_at >= %s AND b.created_at < %s", (start_utc, end_utc))
         self.send_json(200, {"date": date_str, "rows": out})
+
+    def get_courier_booking_report_csv(self, booking_id):
+        out = self.fetch_report_rows("WHERE b.id = %s", (booking_id,))
+        if not out:
+            raise ApiError(404, "Booking not found")
+        self.send_report_csv(out, f"courier-booking-{booking_id}-report.csv")
 
     # Single entry point for "give me everything about X" — X can be a
     # courier booking id (numeric) or an invoice number. Works even for an

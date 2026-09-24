@@ -440,7 +440,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     </div>
     <div class="table-wrap">
       <table class="data-table">
-        <thead><tr><th>Pickup date</th><th>Brand</th><th>Store</th><th>Destination name</th><th class="num-col">Boxes</th><th class="num-col">Declared price</th><th class="num-col">Weight (KG)</th><th>Invoice(s)</th><th>Tracking</th><th></th></tr></thead>
+        <thead><tr><th>Pickup date</th><th>Brand</th><th>Store</th><th>Destination name</th><th class="num-col">Boxes</th><th class="num-col">Declared price</th><th class="num-col">Weight (KG)</th><th>Invoice(s)</th><th>Tracking</th><th>Report</th><th></th></tr></thead>
         <tbody id="cbBookingsBody"></tbody>
       </table>
     </div>
@@ -2229,8 +2229,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       shipmentIds: cbSelectedShipments.map(function (s) { return s.id; }),
       destinationName: destinationName,
       pickupDate: pickupDate, boxes: boxes, declaredPrice: declaredPrice, weightKg: weightKg,
-    }).then(function () {
-      toast("Courier booking created");
+    }).then(function (created) {
+      toast("Courier booking created — downloading its report");
       cbSelectedShipments = [];
       cbRenderSelected();
       cbRecomputeFields();
@@ -2239,8 +2239,20 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       document.getElementById("cbWeight").value = "";
       document.getElementById("cbPickupDate").value = "";
       cbRenderBookings();
+      triggerDownload("/api/courier-bookings/" + created.id + "/report");
     }).catch(function (err) { errEl.textContent = err.message; });
   });
+
+  // Fires a plain GET at a download endpoint (Content-Disposition: attachment
+  // does the rest) without opening a new tab or tripping a popup blocker.
+  function triggerDownload(url) {
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
 
   function cbRenderBookings() {
     return getJson("/api/courier-bookings").then(function (bookings) {
@@ -2258,6 +2270,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
           "<td class='num-col mono'>" + formatMoney(b.declaredPrice) + "</td>" +
           "<td class='num-col mono'>" + b.weightKg + "</td>" +
           "<td class='mono'>" + escapeHtml(b.invoiceNumbers) + "</td>" +
+          "<td></td>" +
           "<td></td>" +
           "<td></td>";
 
@@ -2283,6 +2296,13 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         });
         trackingCell.appendChild(trackingInput);
         trackingCell.appendChild(saveTrackingBtn);
+
+        var reportLink = document.createElement("a");
+        reportLink.href = "/api/courier-bookings/" + b.id + "/report";
+        reportLink.className = "link-btn";
+        reportLink.textContent = "Download CSV";
+        reportLink.setAttribute("download", "");
+        tr.children[9].appendChild(reportLink);
 
         var delBtn = document.createElement("button");
         delBtn.type = "button";
