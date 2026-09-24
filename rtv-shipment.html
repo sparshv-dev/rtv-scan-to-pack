@@ -64,6 +64,26 @@ a { color: var(--accent); }
 .email-panel .field textarea { min-height: 170px; resize: vertical; }
 .email-panel .copy-btn { align-self: flex-end; white-space: nowrap; }
 
+/* ---- brand picker: grouped, expandable, searchable dropdown replacing a plain <select> ---- */
+.brand-picker { position: relative; flex: 1; }
+.brand-picker.is-disabled { opacity: 0.5; pointer-events: none; }
+.brand-picker-btn { width: 100%; text-align: left; font: inherit; font-size: 13.5px; padding: 9px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.brand-picker-btn .placeholder { color: var(--muted); }
+.brand-picker-btn .chev { color: var(--muted); font-size: 10px; flex: none; }
+.brand-picker-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.brand-picker-popover { display: none; position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0; max-height: 340px; overflow-y: auto; background: var(--paper-raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 28px var(--shadow); }
+.brand-picker.is-open .brand-picker-popover { display: block; }
+.brand-picker-search { position: sticky; top: 0; background: var(--paper-raised); padding: 8px; border-bottom: 1px solid var(--line); }
+.brand-picker-search input { width: 100%; font: inherit; font-size: 13px; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+.brand-picker-empty { padding: 14px 12px; font-size: 12.5px; color: var(--muted); }
+.brand-group-header { display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: pointer; font-size: 13px; font-weight: 700; }
+.brand-group-header:hover, .brand-location-row:hover, .brand-picker-flat-row:hover { background: var(--zebra); }
+.brand-group-header .chev { font-size: 10px; color: var(--muted); flex: none; width: 10px; }
+.brand-group-header .count { font-weight: 400; color: var(--muted); font-size: 11.5px; }
+.brand-location-row, .brand-picker-flat-row { display: block; width: 100%; text-align: left; padding: 8px 12px 8px 30px; font: inherit; font-size: 12.5px; background: none; border: none; cursor: pointer; color: var(--ink); }
+.brand-picker-flat-row { padding-left: 12px; font-weight: 600; }
+.brand-location-row .loc-meta { display: block; color: var(--muted); font-size: 11px; font-weight: 400; }
+
 table.data-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 table.data-table th { text-align: left; font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid var(--line); padding: 7px 8px; font-weight: 700; }
 table.data-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -231,9 +251,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 
     <div class="field-grid">
       <div class="field">
-        <label for="boxVendorSelect">Brand for this box</label>
+        <label id="boxVendorPickerLabel">Brand for this box</label>
         <div class="row-inline">
-          <select id="boxVendorSelect"></select>
+          <div class="brand-picker" id="boxVendorPicker"></div>
           <button type="button" class="link-btn" id="toggleNewBrand" style="white-space:nowrap;">+ Add new brand</button>
         </div>
       </div>
@@ -1471,7 +1491,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     document.getElementById("boxEmpty").style.display = currentBox.length ? "none" : "block";
     // Brand is locked in once the box has items — switching mid-box would silently
     // mislabel already-scanned rows, so require closing the box first.
-    document.getElementById("boxVendorSelect").disabled = currentBox.length > 0;
+    document.getElementById("boxVendorPicker").classList.toggle("is-disabled", currentBox.length > 0);
     document.getElementById("toggleNewBrand").disabled = currentBox.length > 0;
     currentBox.forEach(function (it, idx) {
       var tr = document.createElement("tr");
@@ -1556,33 +1576,182 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   });
 
   // ---- brand for the box: chosen once, up front, before any scanning ----
-  function refreshBoxVendorSelect() {
-    var select = document.getElementById("boxVendorSelect");
-    var current = select.value;
-    select.innerHTML = "";
-    var placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = "— Select brand —";
-    select.appendChild(placeholder);
-    state.vendors.slice().sort(function (a, b) { return a.name.localeCompare(b.name); }).forEach(function (v) {
-      var opt = document.createElement("option");
-      opt.value = String(v.id);
-      opt.textContent = vendorLabel(v);
-      select.appendChild(opt);
+  // Custom dropdown, not a native <select> — a <select> can't group options
+  // under an expandable/collapsible header or be filtered by typing, and
+  // with 100+ brands (some with a dozen store locations each) both matter.
+  var boxVendorId = null;
+  var brandPickerExpanded = {}; // brand -> true once manually expanded (a search forces everything open regardless)
+  var brandPickerQuery = "";
+
+  // Vendor names follow "{Brand}-{Location}" (e.g. "JackJone-InfiMala-2");
+  // splitting on the first hyphen recovers the brand for grouping. Names
+  // with no hyphen (the original single-location seed brands) are their
+  // own one-item group, rendered as a flat row with nothing to expand.
+  function brandPrefix(name) {
+    var i = name.indexOf("-");
+    return i === -1 ? name : name.slice(0, i);
+  }
+
+  function groupVendorsForPicker(vendors) {
+    var byBrand = {}, order = [];
+    vendors.forEach(function (v) {
+      var brand = brandPrefix(v.name);
+      if (!byBrand[brand]) { byBrand[brand] = []; order.push(brand); }
+      byBrand[brand].push(v);
     });
-    if (current) select.value = current;
+    order.sort(function (a, b) { return a.localeCompare(b); });
+    return order.map(function (brand) {
+      return { brand: brand, items: byBrand[brand].slice().sort(function (a, b) { return a.name.localeCompare(b.name); }) };
+    });
+  }
+
+  function vendorMatchesQuery(v, q) {
+    if (!q) return true;
+    return (v.name + " " + (v.warehouseLabel || "")).toLowerCase().indexOf(q) !== -1;
+  }
+
+  function selectBoxVendor(vendor) {
+    boxVendorId = vendor ? String(vendor.id) : null;
+    renderBoxVendorPicker();
+    applyBoxVendorSelection();
   }
 
   function applyBoxVendorSelection() {
-    var id = document.getElementById("boxVendorSelect").value;
-    currentVendor = id ? state.vendors.find(function (v) { return String(v.id) === id; }) : null;
+    currentVendor = boxVendorId ? state.vendors.find(function (v) { return String(v.id) === boxVendorId; }) : null;
     var scanInputEl = document.getElementById("scanInput");
     scanInputEl.disabled = !currentVendor;
     scanInputEl.placeholder = currentVendor ? "Scan or type tracking ID, then Enter" : "Select a brand above first";
     if (currentVendor) scanInputEl.focus();
   }
 
-  document.getElementById("boxVendorSelect").addEventListener("change", applyBoxVendorSelection);
+  function renderBoxVendorPicker() {
+    var root = document.getElementById("boxVendorPicker");
+    root.innerHTML = "";
+    var selected = boxVendorId ? state.vendors.find(function (v) { return String(v.id) === boxVendorId; }) : null;
+
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "brand-picker-btn";
+    btn.setAttribute("aria-haspopup", "true");
+    var btnLabel = document.createElement("span");
+    if (selected) { btnLabel.textContent = vendorLabel(selected); }
+    else { btnLabel.textContent = "— Select brand —"; btnLabel.className = "placeholder"; }
+    var chev = document.createElement("span");
+    chev.className = "chev";
+    chev.textContent = "▾";
+    btn.appendChild(btnLabel);
+    btn.appendChild(chev);
+    root.appendChild(btn);
+
+    var popover = document.createElement("div");
+    popover.className = "brand-picker-popover";
+    var searchWrap = document.createElement("div");
+    searchWrap.className = "brand-picker-search";
+    var searchInput = document.createElement("input");
+    searchInput.type = "text";
+    searchInput.placeholder = "Search brand or location…";
+    searchWrap.appendChild(searchInput);
+    popover.appendChild(searchWrap);
+    var listWrap = document.createElement("div");
+    popover.appendChild(listWrap);
+    root.appendChild(popover);
+
+    function renderList() {
+      listWrap.innerHTML = "";
+      var q = brandPickerQuery;
+      var filtered = q ? state.vendors.filter(function (v) { return vendorMatchesQuery(v, q); }) : state.vendors;
+      var groups = groupVendorsForPicker(filtered);
+
+      if (groups.length === 0) {
+        var empty = document.createElement("div");
+        empty.className = "brand-picker-empty";
+        empty.textContent = "No matches.";
+        listWrap.appendChild(empty);
+        return;
+      }
+
+      groups.forEach(function (g) {
+        if (g.items.length === 1 && brandPrefix(g.items[0].name) === g.items[0].name) {
+          var flatBtn = document.createElement("button");
+          flatBtn.type = "button";
+          flatBtn.className = "brand-picker-flat-row";
+          flatBtn.textContent = vendorLabel(g.items[0]);
+          flatBtn.addEventListener("click", function () { selectBoxVendor(g.items[0]); closeBoxVendorPicker(); });
+          listWrap.appendChild(flatBtn);
+          return;
+        }
+
+        var isExpanded = !!q || !!brandPickerExpanded[g.brand];
+        var header = document.createElement("div");
+        header.className = "brand-group-header";
+        var chevSpan = document.createElement("span");
+        chevSpan.className = "chev";
+        chevSpan.textContent = isExpanded ? "▾" : "▸";
+        var nameSpan = document.createElement("span");
+        nameSpan.textContent = g.brand + " ";
+        var countSpan = document.createElement("span");
+        countSpan.className = "count";
+        countSpan.textContent = "(" + g.items.length + ")";
+        nameSpan.appendChild(countSpan);
+        header.appendChild(chevSpan);
+        header.appendChild(nameSpan);
+        header.addEventListener("click", function () {
+          if (q) return; // a search already forces every group open
+          brandPickerExpanded[g.brand] = !brandPickerExpanded[g.brand];
+          renderList();
+        });
+        listWrap.appendChild(header);
+
+        var childrenWrap = document.createElement("div");
+        childrenWrap.style.display = isExpanded ? "block" : "none";
+        g.items.forEach(function (v) {
+          var row = document.createElement("button");
+          row.type = "button";
+          row.className = "brand-location-row";
+          row.textContent = v.name;
+          if (v.warehouseLabel) {
+            var meta = document.createElement("span");
+            meta.className = "loc-meta";
+            meta.textContent = v.warehouseLabel;
+            row.appendChild(meta);
+          }
+          row.addEventListener("click", function () { selectBoxVendor(v); closeBoxVendorPicker(); });
+          childrenWrap.appendChild(row);
+        });
+        listWrap.appendChild(childrenWrap);
+      });
+    }
+
+    searchInput.addEventListener("click", function (e) { e.stopPropagation(); });
+    searchInput.addEventListener("input", function () {
+      brandPickerQuery = searchInput.value.trim().toLowerCase();
+      renderList();
+    });
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var willOpen = !root.classList.contains("is-open");
+      root.classList.toggle("is-open", willOpen);
+      if (willOpen) {
+        brandPickerQuery = "";
+        searchInput.value = "";
+        renderList();
+        searchInput.focus();
+      }
+    });
+
+    renderList();
+  }
+
+  function closeBoxVendorPicker() {
+    document.getElementById("boxVendorPicker").classList.remove("is-open");
+  }
+  document.addEventListener("click", function (e) {
+    var root = document.getElementById("boxVendorPicker");
+    if (root && !root.contains(e.target)) closeBoxVendorPicker();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") closeBoxVendorPicker();
+  });
 
   wireToggle("toggleNewBrand", "newBrandForm");
   document.getElementById("cancelBrand").addEventListener("click", function () {
@@ -1599,9 +1768,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       contactEmail: document.getElementById("nb-contactEmail").value.trim(),
     }).then(function (vendor) {
       state.vendors.push(vendor);
-      refreshBoxVendorSelect();
-      document.getElementById("boxVendorSelect").value = vendor.id;
-      applyBoxVendorSelection();
+      selectBoxVendor(vendor);
       document.getElementById("newBrandForm").classList.remove("is-open");
       ["nb-name", "nb-shortName", "nb-address", "nb-contactPhone", "nb-contactEmail"].forEach(function (id) { document.getElementById(id).value = ""; });
       toast("Brand saved: " + vendor.name);
@@ -1845,7 +2012,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         state.vendors = results[1];
         state.emailTemplate = results[2];
         refreshHubSelect();
-        refreshBoxVendorSelect();
+        renderBoxVendorPicker();
         renderRecent();
       })
       .catch(function (err) {
