@@ -231,7 +231,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   <div class="brand-tabs" id="topTabs" role="tablist">
     <button type="button" id="tabPackShipments" aria-selected="true">Pack shipments</button>
     <button type="button" id="tabShipmentArchive" aria-selected="false">Shipment archive</button>
-    <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings <span style="font-weight:400; opacity:0.7;">(testing)</span></button>
+    <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings</button>
   </div>
 </div>
 
@@ -419,7 +419,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 <div class="app-shell" id="courierBookingsView" style="display:none; max-width: 1440px;">
   <div class="app-head">
     <div>
-      <p class="eyebrow">Return to Vendor · courier pickup (testing)</p>
+      <p class="eyebrow">Return to Vendor · courier pickup</p>
       <h1>Book a courier pickup</h1>
     </div>
   </div>
@@ -456,6 +456,10 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <div style="display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap;">
       <h2>Bookings</h2>
       <a href="/api/courier-bookings/export" class="link-btn" download>Export CSV (DTDC format)</a>
+    </div>
+    <div class="field" style="max-width:360px; margin-bottom:14px;">
+      <label for="cbBookingsSearch">Search bookings</label>
+      <input id="cbBookingsSearch" placeholder="Invoice, brand, store, destination or tracking…" autocomplete="off">
     </div>
     <div class="table-wrap">
       <table class="data-table">
@@ -2321,12 +2325,27 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     document.body.removeChild(a);
   }
 
+  var cbAllBookings = [];
+
   function cbRenderBookings() {
     return getJson("/api/courier-bookings").then(function (bookings) {
-      var body = document.getElementById("cbBookingsBody");
-      body.innerHTML = "";
-      document.getElementById("cbBookingsEmpty").style.display = bookings.length ? "none" : "block";
-      bookings.forEach(function (b) {
+      cbAllBookings = bookings;
+      cbRenderBookingRows();
+    }).catch(function (err) { toast("Couldn't load bookings: " + err.message, true); });
+  }
+
+  function cbRenderBookingRows() {
+    var q = document.getElementById("cbBookingsSearch").value.trim().toLowerCase();
+    var bookings = !q ? cbAllBookings : cbAllBookings.filter(function (b) {
+      return [b.pickupDate, b.vendorName, b.destinationName, b.invoiceNumbers, b.status, b.tracking].some(
+        function (v) { return v && String(v).toLowerCase().indexOf(q) !== -1; }
+      );
+    });
+    var body = document.getElementById("cbBookingsBody");
+    body.innerHTML = "";
+    document.getElementById("cbBookingsEmpty").style.display = bookings.length ? "none" : "block";
+    document.getElementById("cbBookingsEmpty").textContent = q ? "No bookings match your search." : "No courier bookings yet.";
+    bookings.forEach(function (b) {
         var tr = document.createElement("tr");
         tr.innerHTML =
           "<td>" + escapeHtml(b.pickupDate) + "</td>" +
@@ -2413,8 +2432,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         tr.lastElementChild.appendChild(delBtn);
         body.appendChild(tr);
       });
-    }).catch(function (err) { toast("Couldn't load bookings: " + err.message, true); });
   }
+  document.getElementById("cbBookingsSearch").addEventListener("input", cbRenderBookingRows);
 
   function hideAllTabViews() {
     document.getElementById("formView").style.display = "none";
