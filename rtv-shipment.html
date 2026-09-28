@@ -4,21 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ship a Return — RTV</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
 <style>
 :root {
-  --ink: #1A1A1A; --paper: #FAFAFA; --paper-raised: #FFFFFF;
-  --accent: #B23A1E; --line: #E2E2E2; --muted: #6B6B6B; --zebra: #F2F2F2;
-  --bad: #B23A1E; --shadow: rgba(0, 0, 0, 0.12);
+  --ink: #1A1D24; --paper: #F5F6F8; --paper-raised: #FFFFFF;
+  --accent: #2F6FEB; --line: #E3E6EC; --muted: #8A93A3; --zebra: #F0F1F4;
+  --bad: #D63C3C; --good: #0E7A56; --warn: #B36B00; --shadow: rgba(20, 30, 50, 0.10);
 }
 @media (prefers-color-scheme: dark) {
-  :root { --ink:#EDEDED; --paper:#121212; --paper-raised:#1C1C1C; --accent:#E2703A; --line:#333333; --muted:#9A9A9A; --zebra:#202020; --bad:#E2703A; --shadow:rgba(0,0,0,0.5); }
+  :root { --ink:#EDEFF3; --paper:#0A0C10; --paper-raised:#12151C; --accent:#4C8DFF; --line:#242A35; --muted:#5C6373; --zebra:#181C25; --bad:#F0575B; --good:#34D399; --warn:#F5A623; --shadow:rgba(0,0,0,0.45); }
 }
-:root[data-theme="dark"] { --ink:#EDEDED; --paper:#121212; --paper-raised:#1C1C1C; --accent:#E2703A; --line:#333333; --muted:#9A9A9A; --zebra:#202020; --bad:#E2703A; --shadow:rgba(0,0,0,0.5); }
-:root[data-theme="light"] { --ink:#1A1A1A; --paper:#FAFAFA; --paper-raised:#FFFFFF; --accent:#B23A1E; --line:#E2E2E2; --muted:#6B6B6B; --zebra:#F2F2F2; --bad:#B23A1E; --shadow:rgba(0,0,0,0.12); }
+:root[data-theme="dark"] { --ink:#EDEFF3; --paper:#0A0C10; --paper-raised:#12151C; --accent:#4C8DFF; --line:#242A35; --muted:#5C6373; --zebra:#181C25; --bad:#F0575B; --good:#34D399; --warn:#F5A623; --shadow:rgba(0,0,0,0.45); }
+:root[data-theme="light"] { --ink:#1A1D24; --paper:#F5F6F8; --paper-raised:#FFFFFF; --accent:#2F6FEB; --line:#E3E6EC; --muted:#8A93A3; --zebra:#F0F1F4; --bad:#D63C3C; --good:#0E7A56; --warn:#B36B00; --shadow:rgba(20, 30, 50, 0.10); }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: -apple-system,"Segoe UI","Helvetica Neue",Arial,sans-serif; }
-.mono { font-family: "SF Mono","Cascadia Mono",Consolas,"Roboto Mono",monospace; font-variant-numeric: tabular-nums; }
+html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: 'IBM Plex Sans',-apple-system,"Segoe UI","Helvetica Neue",Arial,sans-serif; }
+h1, h2, h3, .card h2, .app-head h1 { font-family: 'Space Grotesk',-apple-system,"Segoe UI",sans-serif; }
+.mono { font-family: 'IBM Plex Mono',"SF Mono","Cascadia Mono",Consolas,"Roboto Mono",monospace; font-variant-numeric: tabular-nums; }
 a { color: var(--accent); }
 
 .app-shell { max-width: 720px; margin: 0 auto; padding: 28px 20px 90px; }
@@ -131,6 +134,12 @@ table.data-table tr:hover td { background: var(--zebra); }
 .brand-panel-head b { font-size: 16px; }
 .brand-panel-head .meta { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
 
+/* ---- top navigation bar ---- */
+.topbar { display: flex; align-items: center; gap: 14px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--paper-raised); }
+.topbar-logo { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); color: var(--paper-raised); display: flex; align-items: center; justify-content: center; font-family: 'Space Grotesk',sans-serif; font-weight: 700; font-size: 12px; flex: none; }
+.topbar-word { font-size: 13.5px; font-weight: 700; letter-spacing: -0.01em; }
+.topbar .brand-tabs { margin: 0; }
+
 /* ---- print view chrome ---- */
 .print-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
 .print-toolbar .meta { font-size: 12px; color: var(--muted); }
@@ -216,7 +225,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 </head>
 <body>
 
-<div class="app-shell no-print" style="padding-bottom:0;">
+<div class="topbar no-print">
+  <div class="topbar-logo">Z</div>
+  <div class="topbar-word">Zilo RTV Console</div>
   <div class="brand-tabs" id="topTabs" role="tablist">
     <button type="button" id="tabPackShipments" aria-selected="true">Pack shipments</button>
     <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings <span style="font-weight:400; opacity:0.7;">(testing)</span></button>
