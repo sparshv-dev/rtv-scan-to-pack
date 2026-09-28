@@ -260,6 +260,7 @@ def init_db():
         ALTER TABLE courier_bookings ADD COLUMN IF NOT EXISTS hub_id INTEGER REFERENCES hubs(id);
         ALTER TABLE courier_bookings ADD COLUMN IF NOT EXISTS destination_name TEXT;
         ALTER TABLE courier_bookings ADD COLUMN IF NOT EXISTS tracking TEXT;
+        ALTER TABLE courier_bookings ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'Shared with DTDC';
         CREATE TABLE IF NOT EXISTS courier_booking_shipments (
             booking_id INTEGER NOT NULL REFERENCES courier_bookings(id) ON DELETE CASCADE,
             shipment_id INTEGER NOT NULL REFERENCES shipments(id) UNIQUE,
@@ -356,6 +357,16 @@ COURIER_BOOKING_CONSTANTS = {
     "codToPay": "Prepaid",
 }
 
+# The lifecycle a booking moves through after it's created — fixed list, not
+# stored anywhere else, so the frontend's dropdown and this validation stay
+# hand in sync.
+COURIER_BOOKING_STATUSES = [
+    "Shared with DTDC",
+    "Picked up from store",
+    "In Transit",
+    "Delivered to Brand",
+]
+
 
 def compute_origin_name(hub_name):
     if not hub_name:
@@ -385,6 +396,7 @@ def courier_booking_to_dict(row):
         "warehouseLabel": row["warehouse_label"],
         "invoiceNumbers": row["invoice_numbers"],
         "tracking": row["tracking"],
+        "status": row["status"],
         "destinationName": row["destination_name"],
         "destinationPincode": row["vendor_pincode"],
         "destinationPhone": row["vendor_contact_phone"],
@@ -489,6 +501,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.lookup_tracking(tracking)
             if path == "/api/shipments":
                 return self.list_shipments()
+            if path == "/api/shipments/archive":
+                q = (qs.get("q") or [""])[0].strip()
+                return self.list_shipments_archive(q)
             if path == "/api/email-template":
                 return self.get_email_template()
             if path == "/api/shipments/bookable":
@@ -563,7 +578,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             m = re.match(r"^/api/courier-bookings/(\d+)$", path)
             if m:
-                return self.update_courier_booking_tracking(int(m.group(1)))
+                return self.update_courier_booking(int(m.group(1)))
             return self.send_json(404, {"error": "Unknown endpoint"})
         except ApiError as e:
             self.send_json(e.status, {"error": e.message})
@@ -800,6 +815,53 @@ class Handler(BaseHTTPRequestHandler):
         ]
         self.send_json(200, out)
 
+    # Full history for the Shipment Archive tab — unlike list_shipments()
+    # (capped at 200, backs the small "recent shipments" widget), this has no
+    # practical cap and supports a free-text search across invoice/vendor/hub.
+    def list_shipments_archive(self, q):
+        conn = get_db()
+        where_sql = ""
+        params = []
+        if q:
+            where_sql = "WHERE s.invoice_no ILIKE %s OR v.name ILIKE %s OR h.name ILIKE %s"
+            like = f"%{q}%"
+            params = [like, like, like]
+        rows = conn.execute(
+            f"""
+            SELECT s.id, s.invoice_no, s.ship_date, s.created_at,
+                   h.name AS hub_name, v.name AS vendor_name, v.warehouse_label,
+                   (SELECT COUNT(DISTINCT box_no) FROM shipment_items WHERE shipment_id = s.id) AS boxes,
+                   (SELECT COUNT(*) FROM shipment_items WHERE shipment_id = s.id) AS lines,
+                   (SELECT COALESCE(SUM(qty), 0) FROM shipment_items WHERE shipment_id = s.id) AS units,
+                   (SELECT COALESCE(SUM(qty * value), 0) FROM shipment_items WHERE shipment_id = s.id) AS amount
+            FROM shipments s
+            JOIN hubs h ON h.id = s.hub_id
+            JOIN vendors v ON v.id = s.vendor_id
+            {where_sql}
+            ORDER BY s.id DESC
+            LIMIT 5000
+            """,
+            tuple(params),
+        ).fetchall()
+        conn.close()
+        out = [
+            {
+                "id": r["id"],
+                "invoiceNo": r["invoice_no"],
+                "shipDate": r["ship_date"],
+                "createdAt": r["created_at"],
+                "hubName": r["hub_name"],
+                "vendorName": r["vendor_name"],
+                "warehouseLabel": r["warehouse_label"],
+                "boxes": r["boxes"],
+                "lines": r["lines"],
+                "units": r["units"],
+                "amount": r["amount"],
+            }
+            for r in rows
+        ]
+        self.send_json(200, out)
+
     def get_shipment(self, shipment_id):
         conn = get_db()
         s = conn.execute("SELECT * FROM shipments WHERE id = %s", (shipment_id,)).fetchone()
@@ -932,7 +994,7 @@ class Handler(BaseHTTPRequestHandler):
         rows = conn.execute(
             """
             SELECT b.id, b.pickup_date, b.boxes, b.declared_price, b.weight_kg, b.created_at,
-                   b.destination_name, b.tracking,
+                   b.destination_name, b.tracking, b.status,
                    v.name AS vendor_name, v.warehouse_label, v.pincode AS vendor_pincode,
                    v.contact_phone AS vendor_contact_phone, v.address AS vendor_address,
                    h.name AS hub_name, h.pincode AS hub_pincode, h.contact_name AS hub_contact_name,
@@ -1024,18 +1086,32 @@ class Handler(BaseHTTPRequestHandler):
         conn.close()
         self.send_json(200, {"id": booking_id})
 
-    def update_courier_booking_tracking(self, booking_id):
+    def update_courier_booking(self, booking_id):
         body = self.read_json_body()
-        tracking = (body.get("tracking") or "").strip()
         conn = get_db()
         row = conn.execute("SELECT id FROM courier_bookings WHERE id = %s", (booking_id,)).fetchone()
         if not row:
             conn.close()
             raise ApiError(404, "Booking not found")
-        conn.execute("UPDATE courier_bookings SET tracking = %s WHERE id = %s", (tracking, booking_id))
+
+        updates = {}
+        if "tracking" in body:
+            updates["tracking"] = (body.get("tracking") or "").strip()
+        if "status" in body:
+            status = (body.get("status") or "").strip()
+            if status not in COURIER_BOOKING_STATUSES:
+                conn.close()
+                raise ApiError(400, "status must be one of: " + ", ".join(COURIER_BOOKING_STATUSES))
+            updates["status"] = status
+        if not updates:
+            conn.close()
+            raise ApiError(400, "Nothing to update — send 'tracking' and/or 'status'")
+
+        set_sql = ", ".join(f"{col} = %s" for col in updates)
+        conn.execute(f"UPDATE courier_bookings SET {set_sql} WHERE id = %s", tuple(updates.values()) + (booking_id,))
         conn.commit()
         conn.close()
-        self.send_json(200, {"id": booking_id, "tracking": tracking})
+        self.send_json(200, dict(updates, id=booking_id))
 
     # Column order matches DTDC's own bulk-booking template exactly, so this
     # file can go straight to them without reshuffling anything.
@@ -1220,7 +1296,7 @@ class Handler(BaseHTTPRequestHandler):
             brow = conn.execute(
                 """
                 SELECT b.id, b.pickup_date, b.boxes, b.declared_price, b.weight_kg, b.created_at,
-                       b.destination_name, b.tracking,
+                       b.destination_name, b.tracking, b.status,
                        v.name AS vendor_name, v.warehouse_label, v.pincode AS vendor_pincode,
                        v.contact_phone AS vendor_contact_phone, v.address AS vendor_address,
                        h.name AS hub_name, h.pincode AS hub_pincode, h.contact_name AS hub_contact_name,

@@ -230,6 +230,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   <div class="topbar-word">Zilo RTV Console</div>
   <div class="brand-tabs" id="topTabs" role="tablist">
     <button type="button" id="tabPackShipments" aria-selected="true">Pack shipments</button>
+    <button type="button" id="tabShipmentArchive" aria-selected="false">Shipment archive</button>
     <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings <span style="font-weight:400; opacity:0.7;">(testing)</span></button>
   </div>
 </div>
@@ -357,6 +358,27 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   </div>
 </div>
 
+<div class="app-shell" id="shipmentArchiveView" style="display:none; max-width: 960px;">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · full history</p>
+      <h1>Shipment archive</h1>
+    </div>
+  </div>
+  <div class="card">
+    <h2>All scanned shipments</h2>
+    <p class="hint">Every shipment ever packed, newest first. Reopen any of them to reprint its box labels or invoice copies.</p>
+    <div class="field" style="margin-bottom:14px;">
+      <label for="archiveSearch">Search</label>
+      <input id="archiveSearch" placeholder="Invoice number, vendor or hub…" autocomplete="off">
+    </div>
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>Invoice No.</th><th>Ship date</th><th>Hub</th><th>Vendor</th><th>Boxes</th><th>Units</th><th>Amount</th></tr></thead><tbody id="archiveBody"></tbody></table>
+    </div>
+    <p class="empty-state" id="archiveEmpty" style="display:none;">No shipments found.</p>
+  </div>
+</div>
+
 <div class="app-shell" id="printView" style="display:none;">
   <div class="app-head no-print">
     <div>
@@ -394,7 +416,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   <div id="brandPanels"></div>
 </div>
 
-<div class="app-shell" id="courierBookingsView" style="display:none;">
+<div class="app-shell" id="courierBookingsView" style="display:none; max-width: 1440px;">
   <div class="app-head">
     <div>
       <p class="eyebrow">Return to Vendor · courier pickup (testing)</p>
@@ -402,21 +424,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     </div>
   </div>
 
-  <div class="card">
-    <h2>Look up</h2>
-    <p class="hint">Type a courier booking ID or an invoice number to pull everything known about it — booking details if it's been booked, plus every scanned item, value, and Marketplace ID.</p>
-    <div class="field-grid">
-      <div class="field span-2">
-        <label for="clQuery">Booking ID or invoice number</label>
-        <input id="clQuery" placeholder="e.g. 4 or RTV-GHK-20260911-001" autocomplete="off">
-      </div>
-    </div>
-    <button type="button" class="btn secondary" id="clSearchBtn" style="margin-top:10px;">Look up</button>
-    <p class="field-error" id="clError"></p>
-    <div id="clResult" style="margin-top:14px;"></div>
-  </div>
-
-  <div class="card">
+  <div style="display:flex; gap:20px; align-items:flex-start;">
+  <div class="card" style="flex:1.3; min-width:0;">
     <h2>New booking</h2>
     <p class="hint">Search and pick one or more invoices going to the same store, then fill in the pickup details for DTDC. Once an invoice is used here, it won't show up again for a future booking.</p>
 
@@ -430,7 +439,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <div id="cbSelectedInvoices" class="cb-selected-invoices"></div>
     <p class="empty-state" id="cbSelectedEmpty">No invoices selected yet.</p>
 
-    <div class="field-grid" style="margin-top:16px;">
+    <div class="field-grid" style="margin-top:16px; grid-template-columns: repeat(4, 1fr);">
       <div class="field"><label>Pickup hub</label><input id="cbHub" disabled></div>
       <div class="field"><label>Brand</label><input id="cbBrand" disabled></div>
       <div class="field"><label>Store</label><input id="cbStore" disabled></div>
@@ -444,6 +453,21 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <button type="button" class="btn" id="cbCreateBtn" style="margin-top:12px;" disabled>Create booking</button>
   </div>
 
+  <div class="card" style="flex:1; min-width:0;">
+    <h2>Look up</h2>
+    <p class="hint">Type a courier booking ID or an invoice number to pull everything known about it — booking details if it's been booked, plus every scanned item, value, and Marketplace ID.</p>
+    <div class="field-grid">
+      <div class="field span-2">
+        <label for="clQuery">Booking ID or invoice number</label>
+        <input id="clQuery" placeholder="e.g. 4 or RTV-GHK-20260911-001" autocomplete="off">
+      </div>
+    </div>
+    <button type="button" class="btn secondary" id="clSearchBtn" style="margin-top:10px;">Look up</button>
+    <p class="field-error" id="clError"></p>
+    <div id="clResult" style="margin-top:14px;"></div>
+  </div>
+  </div>
+
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap;">
       <h2>Bookings</h2>
@@ -451,7 +475,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     </div>
     <div class="table-wrap">
       <table class="data-table">
-        <thead><tr><th>Pickup date</th><th>Brand</th><th>Store</th><th>Destination name</th><th class="num-col">Boxes</th><th class="num-col">Declared price</th><th class="num-col">Weight (KG)</th><th>Invoice(s)</th><th>Tracking</th><th>Report</th><th></th></tr></thead>
+        <thead><tr><th>Pickup date</th><th>Brand</th><th>Store</th><th>Destination name</th><th class="num-col">Boxes</th><th class="num-col">Declared price</th><th class="num-col">Weight (KG)</th><th>Invoice(s)</th><th>Status</th><th>Tracking</th><th>Report</th><th></th></tr></thead>
         <tbody id="cbBookingsBody"></tbody>
       </table>
     </div>
@@ -1454,8 +1478,11 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   });
   document.getElementById("backLink").addEventListener("click", function () {
     document.getElementById("printView").style.display = "none";
-    document.getElementById("formView").style.display = "block";
-    renderRecent();
+    if (printViewOrigin === "shipmentArchiveView") {
+      showShipmentArchiveView();
+    } else {
+      showPackShipmentsView();
+    }
   });
 
   // ================= daily dump import (tracking -> SKU/value master data) =================
@@ -2087,7 +2114,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         link.textContent = s.invoiceNo;
         link.addEventListener("click", function () {
           getJson("/api/shipments/" + s.id)
-            .then(function (full) { openPrintView(full); })
+            .then(function (full) { printViewOrigin = "formView"; openPrintView(full); })
             .catch(function (err) { toast("Couldn't open shipment: " + err.message, true); });
         });
         td0.appendChild(link);
@@ -2105,6 +2132,49 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     }).catch(function (err) { toast("Couldn't load shipments: " + err.message, true); });
   }
 
+  // ================= shipment archive =================
+  // Tracks which tab opened printView, so its Back link returns there
+  // instead of always jumping to Pack shipments.
+  var printViewOrigin = "formView";
+  var archiveSearchDebounce = null;
+
+  function renderArchive(q) {
+    return getJson("/api/shipments/archive?q=" + encodeURIComponent(q || "")).then(function (shipments) {
+      var body = document.getElementById("archiveBody");
+      body.innerHTML = "";
+      document.getElementById("archiveEmpty").style.display = shipments.length ? "none" : "block";
+      shipments.forEach(function (s) {
+        var tr = document.createElement("tr");
+        var td0 = document.createElement("td");
+        var link = document.createElement("button");
+        link.type = "button";
+        link.className = "recent-row-link mono";
+        link.textContent = s.invoiceNo;
+        link.addEventListener("click", function () {
+          getJson("/api/shipments/" + s.id)
+            .then(function (full) { printViewOrigin = "shipmentArchiveView"; openPrintView(full); })
+            .catch(function (err) { toast("Couldn't open shipment: " + err.message, true); });
+        });
+        td0.appendChild(link);
+        tr.appendChild(td0);
+        tr.insertAdjacentHTML("beforeend",
+          "<td>" + escapeHtml(s.shipDate) + "</td>" +
+          "<td>" + escapeHtml(s.hubName) + "</td>" +
+          "<td>" + escapeHtml(s.vendorName) + (s.warehouseLabel ? " — " + escapeHtml(s.warehouseLabel) : "") + "</td>" +
+          "<td>" + s.boxes + "</td>" +
+          "<td>" + s.units + "</td>" +
+          "<td class='mono'>" + formatMoney(s.amount) + "</td>"
+        );
+        body.appendChild(tr);
+      });
+    }).catch(function (err) { toast("Couldn't load shipment archive: " + err.message, true); });
+  }
+  document.getElementById("archiveSearch").addEventListener("input", function () {
+    var q = this.value.trim();
+    clearTimeout(archiveSearchDebounce);
+    archiveSearchDebounce = setTimeout(function () { renderArchive(q); }, 200);
+  });
+
   // ================= courier bookings (testing) =================
   // Bundles one or more already-created invoices into a single DTDC pickup
   // booking. Server enforces same-store-only and rejects an invoice already
@@ -2112,6 +2182,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   // (wrong/duplicate invoice numbers, mistyped fields) can't happen here.
   var cbSelectedShipments = []; // [{id, invoiceNo, vendorId, vendorName, boxes, amount, shipDate}]
   var cbLoaded = false;
+  // Kept in sync by hand with COURIER_BOOKING_STATUSES in rtv-shipment-server.py.
+  var COURIER_BOOKING_STATUSES = ["Shared with DTDC", "Picked up from store", "In Transit", "Delivered to Brand"];
 
   function cbRenderSelected() {
     var wrap = document.getElementById("cbSelectedInvoices");
@@ -2283,9 +2355,36 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
           "<td class='mono'>" + escapeHtml(b.invoiceNumbers) + "</td>" +
           "<td></td>" +
           "<td></td>" +
+          "<td></td>" +
           "<td></td>";
 
-        var trackingCell = tr.children[8];
+        var statusCell = tr.children[8];
+        var statusSelect = document.createElement("select");
+        statusSelect.style.width = "170px";
+        COURIER_BOOKING_STATUSES.forEach(function (opt) {
+          var o = document.createElement("option");
+          o.value = opt;
+          o.textContent = opt;
+          if (opt === b.status) o.selected = true;
+          statusSelect.appendChild(o);
+        });
+        statusSelect.addEventListener("change", function () {
+          var previous = b.status;
+          var next = statusSelect.value;
+          fetch("/api/courier-bookings/" + b.id, {
+            method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: next }),
+          })
+            .then(function (res) { if (!res.ok) throw new Error("Request failed (" + res.status + ")"); })
+            .then(function () { b.status = next; toast("Status updated"); })
+            .catch(function (err) {
+              statusSelect.value = previous;
+              toast("Couldn't update status: " + err.message, true);
+            });
+        });
+        statusCell.appendChild(statusSelect);
+
+        var trackingCell = tr.children[9];
         var trackingInput = document.createElement("input");
         trackingInput.type = "text";
         trackingInput.value = b.tracking || "";
@@ -2313,7 +2412,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         reportLink.className = "link-btn";
         reportLink.textContent = "Download CSV";
         reportLink.setAttribute("download", "");
-        tr.children[9].appendChild(reportLink);
+        tr.children[10].appendChild(reportLink);
 
         var delBtn = document.createElement("button");
         delBtn.type = "button";
@@ -2346,6 +2445,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         "<p class='hint' style='margin-bottom:10px;'>" +
           escapeHtml(b.vendorName) + " · Pickup " + escapeHtml(b.pickupDate) + " · " + b.boxes + " box" + (b.boxes === 1 ? "" : "es") +
           " · " + formatMoney(b.declaredPrice) + " · " + b.weightKg + " kg" +
+          " · Status: " + escapeHtml(b.status) +
           (b.tracking ? " · Tracking: " + escapeHtml(b.tracking) : " · Tracking: not yet provided") +
         "</p>";
       wrap.appendChild(bookingDiv);
@@ -2402,23 +2502,37 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     if (e.key === "Enter") { e.preventDefault(); clRunLookup(); }
   });
 
-  function showCourierBookingsView() {
+  function hideAllTabViews() {
     document.getElementById("formView").style.display = "none";
+    document.getElementById("shipmentArchiveView").style.display = "none";
+    document.getElementById("courierBookingsView").style.display = "none";
     document.getElementById("printView").style.display = "none";
     document.getElementById("batchView").style.display = "none";
-    document.getElementById("courierBookingsView").style.display = "block";
     document.getElementById("tabPackShipments").setAttribute("aria-selected", "false");
+    document.getElementById("tabShipmentArchive").setAttribute("aria-selected", "false");
+    document.getElementById("tabCourierBookings").setAttribute("aria-selected", "false");
+  }
+  function showCourierBookingsView() {
+    hideAllTabViews();
+    document.getElementById("courierBookingsView").style.display = "block";
     document.getElementById("tabCourierBookings").setAttribute("aria-selected", "true");
     if (!cbLoaded) { cbLoaded = true; cbRenderBookings(); }
   }
   function showPackShipmentsView() {
-    document.getElementById("courierBookingsView").style.display = "none";
+    hideAllTabViews();
     document.getElementById("formView").style.display = "block";
     document.getElementById("tabPackShipments").setAttribute("aria-selected", "true");
-    document.getElementById("tabCourierBookings").setAttribute("aria-selected", "false");
+    renderRecent();
+  }
+  function showShipmentArchiveView() {
+    hideAllTabViews();
+    document.getElementById("shipmentArchiveView").style.display = "block";
+    document.getElementById("tabShipmentArchive").setAttribute("aria-selected", "true");
+    renderArchive(document.getElementById("archiveSearch").value.trim());
   }
   document.getElementById("tabCourierBookings").addEventListener("click", showCourierBookingsView);
   document.getElementById("tabPackShipments").addEventListener("click", showPackShipmentsView);
+  document.getElementById("tabShipmentArchive").addEventListener("click", showShipmentArchiveView);
 
   // ================= init =================
   function initApp() {
