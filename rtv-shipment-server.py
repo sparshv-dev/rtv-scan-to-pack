@@ -512,7 +512,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/courier-bookings":
                 return self.list_courier_bookings()
             if path == "/api/courier-bookings/export":
-                return self.export_courier_bookings_csv()
+                status_filter = (qs.get("status") or [""])[0].strip()
+                q_filter = (qs.get("q") or [""])[0].strip()
+                return self.export_courier_bookings_csv(status_filter or None, q_filter or None)
             if path == "/api/courier-bookings/report":
                 date_str = (qs.get("date") or [""])[0].strip()
                 return self.get_courier_bookings_report(date_str)
@@ -1138,7 +1140,12 @@ class Handler(BaseHTTPRequestHandler):
         ("pickupDate", "Pick Date (Tentative)"),
     ]
 
-    def export_courier_bookings_csv(self):
+    # status/q mirror the same filters the Bookings table applies on screen,
+    # so "export what I'm looking at" (e.g. only "Shared with DTDC" rows)
+    # does what it looks like it should. Filtered in Python, not SQL — the
+    # invoice list is a string_agg across a GROUP BY, so it's simpler and
+    # just as fast at this table's size to filter the already-built dicts.
+    def export_courier_bookings_csv(self, status=None, q=None):
         conn = get_db()
         rows = conn.execute(
             """
@@ -1167,9 +1174,19 @@ class Handler(BaseHTTPRequestHandler):
                 s = '"' + s.replace('"', '""') + '"'
             return s
 
+        dicts = [courier_booking_to_dict(r) for r in rows]
+        if status:
+            dicts = [d for d in dicts if d.get("status") == status]
+        if q:
+            q_lower = q.lower()
+            search_fields = ("pickupDate", "vendorName", "destinationName", "invoiceNumbers", "status", "tracking")
+            dicts = [
+                d for d in dicts
+                if any(d.get(f) and q_lower in str(d[f]).lower() for f in search_fields)
+            ]
+
         lines = [",".join(csv_field(label) for _, label in self.COURIER_EXPORT_COLUMNS)]
-        for r in rows:
-            d = courier_booking_to_dict(r)
+        for d in dicts:
             lines.append(",".join(csv_field(d.get(key)) for key, _ in self.COURIER_EXPORT_COLUMNS))
         body = ("\r\n".join(lines) + "\r\n").encode("utf-8")
 

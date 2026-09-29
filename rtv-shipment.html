@@ -455,11 +455,20 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap;">
       <h2>Bookings</h2>
-      <a href="/api/courier-bookings/export" class="link-btn" download>Export CSV (DTDC format)</a>
+      <a href="/api/courier-bookings/export" class="link-btn" id="cbExportBtn" download>Export CSV (DTDC format)</a>
     </div>
-    <div class="field" style="max-width:360px; margin-bottom:14px;">
-      <label for="cbBookingsSearch">Search bookings</label>
-      <input id="cbBookingsSearch" placeholder="Invoice, brand, store, destination or tracking…" autocomplete="off">
+    <p class="hint" style="margin:-4px 0 14px;">Export downloads whatever the search and status filter below currently match — clear both to export everything.</p>
+    <div class="field-grid" style="grid-template-columns: 2fr 1fr; margin-bottom:14px;">
+      <div class="field">
+        <label for="cbBookingsSearch">Search bookings</label>
+        <input id="cbBookingsSearch" placeholder="Invoice, brand, store, destination or tracking…" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="cbBookingsStatusFilter">Filter by status</label>
+        <select id="cbBookingsStatusFilter">
+          <option value="">All statuses</option>
+        </select>
+      </div>
     </div>
     <div class="table-wrap">
       <table class="data-table">
@@ -2336,7 +2345,10 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 
   function cbRenderBookingRows() {
     var q = document.getElementById("cbBookingsSearch").value.trim().toLowerCase();
-    var bookings = !q ? cbAllBookings : cbAllBookings.filter(function (b) {
+    var statusFilter = document.getElementById("cbBookingsStatusFilter").value;
+    var bookings = cbAllBookings.filter(function (b) {
+      if (statusFilter && b.status !== statusFilter) return false;
+      if (!q) return true;
       return [b.pickupDate, b.vendorName, b.destinationName, b.invoiceNumbers, b.status, b.tracking].some(
         function (v) { return v && String(v).toLowerCase().indexOf(q) !== -1; }
       );
@@ -2344,7 +2356,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     var body = document.getElementById("cbBookingsBody");
     body.innerHTML = "";
     document.getElementById("cbBookingsEmpty").style.display = bookings.length ? "none" : "block";
-    document.getElementById("cbBookingsEmpty").textContent = q ? "No bookings match your search." : "No courier bookings yet.";
+    document.getElementById("cbBookingsEmpty").textContent = (q || statusFilter) ? "No bookings match your filters." : "No courier bookings yet.";
     bookings.forEach(function (b) {
         var tr = document.createElement("tr");
         tr.innerHTML =
@@ -2434,6 +2446,28 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       });
   }
   document.getElementById("cbBookingsSearch").addEventListener("input", cbRenderBookingRows);
+
+  (function populateCbStatusFilter() {
+    var select = document.getElementById("cbBookingsStatusFilter");
+    COURIER_BOOKING_STATUSES.forEach(function (opt) {
+      var o = document.createElement("option");
+      o.value = opt;
+      o.textContent = opt;
+      select.appendChild(o);
+    });
+  })();
+  document.getElementById("cbBookingsStatusFilter").addEventListener("change", cbRenderBookingRows);
+
+  document.getElementById("cbExportBtn").addEventListener("click", function (e) {
+    e.preventDefault();
+    var params = new URLSearchParams();
+    var status = document.getElementById("cbBookingsStatusFilter").value;
+    var q = document.getElementById("cbBookingsSearch").value.trim();
+    if (status) params.set("status", status);
+    if (q) params.set("q", q);
+    var qs = params.toString();
+    triggerDownload("/api/courier-bookings/export" + (qs ? "?" + qs : ""));
+  });
 
   function hideAllTabViews() {
     document.getElementById("formView").style.display = "none";
