@@ -1143,7 +1143,7 @@ class Handler(BaseHTTPRequestHandler):
         rows = conn.execute(
             """
             SELECT b.id, b.pickup_date, b.boxes, b.declared_price, b.weight_kg, b.created_at,
-                   b.destination_name, b.tracking,
+                   b.destination_name, b.tracking, b.status,
                    v.name AS vendor_name, v.warehouse_label, v.pincode AS vendor_pincode,
                    v.contact_phone AS vendor_contact_phone, v.address AS vendor_address,
                    h.name AS hub_name, h.pincode AS hub_pincode, h.contact_name AS hub_contact_name,
