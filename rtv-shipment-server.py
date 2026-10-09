@@ -7,13 +7,21 @@ scan-to-pack instead of pasted return-ID manifests) — has its own database
 
 Local run:  DATABASE_URL=postgresql://... python rtv-shipment-server.py [port]
 Hosted (Render): reads DATABASE_URL and PORT from the environment.
+First admin:  python rtv-shipment-server.py create-admin <username>
 """
+import getpass
+import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import sys
+import threading
+import time
 from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.cookies import SimpleCookie
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
@@ -139,6 +147,31 @@ def brand_prefix(name):
     return name[:i] if i != -1 else name
 
 
+def load_dotenv():
+    # Local-only convenience: a gitignored .env next to this file can hold
+    # DATABASE_URL / DB_SCHEMA so they don't have to be set in every shell.
+    # Never overrides a variable that's already set (Render sets its own).
+    path = BASE_DIR / ".env"
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
+
+
+def db_schema():
+    # Which Postgres schema holds the app's tables. "public" is the live
+    # data; testing runs against a separate schema (e.g. rtv_test) in the
+    # same database so live tables are never touched.
+    schema = (os.environ.get("DB_SCHEMA") or "public").strip()
+    if not re.fullmatch(r"[a-z_][a-z0-9_]*", schema):
+        raise RuntimeError(f"DB_SCHEMA '{schema}' isn't a valid schema name")
+    return schema
+
+
 def database_url():
     url = os.environ.get("DATABASE_URL")
     if not url:
@@ -149,13 +182,85 @@ def database_url():
     return url
 
 
+# Connections are kept open and reused instead of opened per call — a
+# fresh connection to the Supabase pooler takes ~2.5s (TLS handshake), a
+# query on an open one ~0.15s, and with the sign-in check every request
+# needs at least two. The semaphore caps open connections and makes callers
+# wait for a free one rather than error. Idle connections older than
+# POOL_RECHECK_SECONDS are pinged before reuse, since the pooler drops idle
+# ones. (psycopg2's own pool isn't used: it closes every connection above
+# its minimum on return, which defeats the point.)
+POOL_SIZE = 8
+POOL_RECHECK_SECONDS = 30
+_pool_lock = threading.Lock()
+_pool_slots = threading.BoundedSemaphore(POOL_SIZE)
+_idle = []  # [(conn, last_used_at)]
+# Every Db opened while serving a request, so anything a handler forgot to
+# close (e.g. an exception mid-query) goes back to the pool at request end.
+_request_dbs = threading.local()
+
+
+def _connect():
+    # search_path is fixed at connect time, so it can't drift and costs no
+    # extra round-trip per request.
+    return psycopg2.connect(database_url(), options=f"-c search_path={db_schema()}")
+
+
+def _checkout():
+    while True:
+        with _pool_lock:
+            item = _idle.pop() if _idle else None
+        if item is None:
+            return _connect()
+        conn, last_used = item
+        if conn.closed:
+            continue
+        if time.time() - last_used < POOL_RECHECK_SECONDS:
+            return conn
+        try:
+            conn.cursor().execute("SELECT 1")
+            conn.rollback()
+            return conn
+        except psycopg2.Error:
+            try:
+                conn.close()
+            except psycopg2.Error:
+                pass
+
+
+def _checkin(conn):
+    broken = conn.closed
+    if not broken:
+        try:
+            conn.rollback()  # never hand on a half-finished transaction
+        except psycopg2.Error:
+            broken = True
+    if broken:
+        try:
+            conn.close()
+        except psycopg2.Error:
+            pass
+        return
+    with _pool_lock:
+        _idle.append((conn, time.time()))
+
+
 class Db:
     """Thin wrapper so call sites can keep using the sqlite3-style
     conn.execute(sql, params).fetchone()/.fetchall() chain psycopg2 doesn't
     support directly (it requires an explicit cursor)."""
 
     def __init__(self):
-        self._conn = psycopg2.connect(database_url())
+        _pool_slots.acquire()
+        try:
+            self._conn = _checkout()
+        except Exception:
+            _pool_slots.release()
+            raise
+        self._open = True
+        if not hasattr(_request_dbs, "items"):
+            _request_dbs.items = []
+        _request_dbs.items.append(self)
 
     def execute(self, sql, params=None):
         cur = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -179,15 +284,29 @@ class Db:
         self._conn.commit()
 
     def close(self):
-        self._conn.close()
+        if not self._open:
+            return
+        self._open = False
+        _checkin(self._conn)
+        _pool_slots.release()
 
 
 def get_db():
     return Db()
 
 
+def release_request_dbs():
+    for db in getattr(_request_dbs, "items", []):
+        db.close()
+    _request_dbs.items = []
+
+
 def init_db():
     conn = get_db()
+    schema = db_schema()
+    if schema != "public":
+        conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+        conn.commit()
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS hubs (
@@ -271,6 +390,30 @@ def init_db():
         -- lookup and the daily report, both of which join through them.
         CREATE INDEX IF NOT EXISTS idx_shipment_items_shipment_id ON shipment_items(shipment_id);
         CREATE INDEX IF NOT EXISTS idx_shipment_items_tracking_id ON shipment_items(tracking_id);
+        -- Logins: one 'hub' account per hub (scoped to that hub's data), plus
+        -- any number of 'admin' accounts (hub_id NULL, see every hub).
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('admin', 'hub')),
+            hub_id INTEGER REFERENCES hubs(id),
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TEXT NOT NULL,
+            last_login_at TEXT
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_one_per_hub ON users(hub_id) WHERE role = 'hub';
+        -- Only a hash of the session token is stored, so a leaked table
+        -- can't be replayed as a login. view_hub_id is an admin's current
+        -- "Viewing: <hub>" pick (NULL = all hubs).
+        CREATE TABLE IF NOT EXISTS sessions (
+            token_hash TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            view_hub_id INTEGER REFERENCES hubs(id) ON DELETE SET NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
         """
     )
     conn.commit()
@@ -448,17 +591,102 @@ def slugify_code(name):
     return letters[:3] or "HUB"
 
 
+# ---------- auth ----------
+SESSION_COOKIE = "rtv_session"
+SESSION_DAYS = 7
+PBKDF2_ITERATIONS = 240000
+MIN_PASSWORD_LENGTH = 8
+USERNAME_RE = re.compile(r"^[a-z0-9._-]{3,40}$")
+
+# Failed sign-ins per username, in memory: after LOCKOUT_ATTEMPTS misses
+# within LOCKOUT_SECONDS the account refuses further tries until the window
+# passes. Resets on restart — it's a brake on password guessing, not an audit.
+LOCKOUT_ATTEMPTS = 5
+LOCKOUT_SECONDS = 15 * 60
+_failed_logins = {}
+
+
+def hash_password(password):
+    salt = secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS)
+    return f"pbkdf2_sha256${PBKDF2_ITERATIONS}${salt.hex()}${dk.hex()}"
+
+
+def verify_password(password, stored):
+    try:
+        _algo, iterations, salt_hex, hash_hex = stored.split("$")
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iterations))
+    except (ValueError, AttributeError):
+        return False
+    return hmac.compare_digest(dk.hex(), hash_hex)
+
+
+def hash_token(token):
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def validate_password(password):
+    if not isinstance(password, str) or len(password) < MIN_PASSWORD_LENGTH:
+        raise ApiError(400, f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
+    return password
+
+
+def normalize_username(body):
+    username = (body.get("username") or "").strip().lower()
+    if not USERNAME_RE.match(username):
+        raise ApiError(400, "Username must be 3-40 characters: letters, numbers, dot, dash or underscore")
+    return username
+
+
+def login_locked(username):
+    times = [t for t in _failed_logins.get(username, []) if time.time() - t < LOCKOUT_SECONDS]
+    _failed_logins[username] = times
+    return len(times) >= LOCKOUT_ATTEMPTS
+
+
+def user_to_dict(row):
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "role": row["role"],
+        "hubId": row["hub_id"],
+        "hubName": row["hub_name"],
+        "hubCode": row["hub_code"],
+        "active": row["active"],
+        "createdAt": row["created_at"],
+        "lastLoginAt": row["last_login_at"],
+    }
+
+
+USER_SELECT_SQL = (
+    "SELECT u.id, u.username, u.role, u.hub_id, u.active, u.created_at, u.last_login_at, "
+    "h.name AS hub_name, h.code AS hub_code "
+    "FROM users u LEFT JOIN hubs h ON h.id = u.hub_id "
+)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "RTVScanApp/1.0"
+
+    def handle_one_request(self):
+        # The signed-in user is cached per request; never carry it over.
+        self.__dict__.pop("_user", None)
+        try:
+            super().handle_one_request()
+        finally:
+            release_request_dbs()
 
     def log_message(self, fmt, *args):
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
-    def send_json(self, status, payload):
+    def send_json(self, status, payload, cookie=None):
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        if cookie is not None:
+            self.set_session_cookie(*cookie)
         self.end_headers()
         self.wfile.write(body)
 
@@ -471,6 +699,78 @@ class Handler(BaseHTTPRequestHandler):
             return json.loads(raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
             raise ApiError(400, "Malformed JSON body")
+
+    # ---------- session / access helpers ----------
+    def session_token(self):
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get("Cookie") or "")
+        except Exception:  # noqa: BLE001 — a mangled Cookie header just means "not signed in"
+            return None
+        morsel = cookie.get(SESSION_COOKIE)
+        return morsel.value if morsel else None
+
+    def current_user(self):
+        if hasattr(self, "_user"):
+            return self._user
+        self._user = None
+        token = self.session_token()
+        if token:
+            conn = get_db()
+            row = conn.execute(
+                """
+                SELECT u.id, u.username, u.role, u.hub_id, u.active, s.view_hub_id,
+                       h.name AS hub_name, h.code AS hub_code
+                FROM sessions s
+                JOIN users u ON u.id = s.user_id
+                LEFT JOIN hubs h ON h.id = u.hub_id
+                WHERE s.token_hash = %s AND s.expires_at > %s
+                """,
+                (hash_token(token), datetime.now(timezone.utc).isoformat()),
+            ).fetchone()
+            conn.close()
+            if row and row["active"]:
+                self._user = dict(row)
+        return self._user
+
+    def require_user(self):
+        user = self.current_user()
+        if not user:
+            raise ApiError(401, "Sign in to continue")
+        return user
+
+    def require_admin(self):
+        user = self.require_user()
+        if user["role"] != "admin":
+            raise ApiError(403, "Only admins can do that")
+        return user
+
+    def scope_hub_id(self):
+        """The hub whose data this request may see: a hub account is always
+        locked to its own hub; an admin sees whichever hub they've picked in
+        the "Viewing" switcher, or every hub (None)."""
+        user = self.require_user()
+        if user["role"] == "hub":
+            return user["hub_id"]
+        return user["view_hub_id"]
+
+    def hub_filter(self, column):
+        hub_id = self.scope_hub_id()
+        if hub_id is None:
+            return "", []
+        return f" AND {column} = %s", [hub_id]
+
+    def check_hub_access(self, hub_id):
+        scoped = self.scope_hub_id()
+        if scoped is not None and hub_id != scoped:
+            raise ApiError(404, "Not found")
+
+    def set_session_cookie(self, token, max_age):
+        secure = "; Secure" if (self.headers.get("X-Forwarded-Proto") or "").lower() == "https" else ""
+        self.send_header(
+            "Set-Cookie",
+            f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}",
+        )
 
     def serve_html(self):
         if not HTML_PATH.exists():
@@ -492,6 +792,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/" or path == "/rtv-shipment.html":
                 return self.serve_html()
+            if path.startswith("/api/"):
+                self.require_user()
+            if path == "/api/me":
+                return self.get_me()
+            if path == "/api/users":
+                return self.list_users()
             if path == "/api/hubs":
                 return self.list_hubs()
             if path == "/api/vendors":
@@ -540,6 +846,15 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         try:
+            if path == "/api/login":
+                return self.login()
+            if path == "/api/logout":
+                return self.logout()
+            self.require_user()
+            if path == "/api/view-hub":
+                return self.set_view_hub()
+            if path == "/api/users":
+                return self.create_user()
             if path == "/api/hubs":
                 return self.create_hub()
             if path == "/api/vendors":
@@ -562,6 +877,7 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         try:
+            self.require_user()
             m = re.match(r"^/api/courier-bookings/(\d+)$", path)
             if m:
                 return self.delete_courier_booking(int(m.group(1)))
@@ -578,6 +894,10 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         try:
+            self.require_user()
+            m = re.match(r"^/api/users/(\d+)$", path)
+            if m:
+                return self.update_user(int(m.group(1)))
             m = re.match(r"^/api/courier-bookings/(\d+)$", path)
             if m:
                 return self.update_courier_booking(int(m.group(1)))
@@ -587,14 +907,166 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             self.send_json(500, {"error": str(e)})
 
+    # ---------- sign-in / accounts ----------
+    def me_payload(self, user):
+        return {
+            "user": {
+                "id": user["id"], "username": user["username"], "role": user["role"],
+                "hubId": user["hub_id"], "hubName": user["hub_name"], "hubCode": user["hub_code"],
+            },
+            "viewHubId": user["view_hub_id"] if user["role"] == "admin" else user["hub_id"],
+        }
+
+    def get_me(self):
+        self.send_json(200, self.me_payload(self.require_user()))
+
+    def login(self):
+        body = self.read_json_body()
+        username = (body.get("username") or "").strip().lower()
+        password = body.get("password") or ""
+        if not username or not password:
+            raise ApiError(400, "Enter your username and password")
+        if login_locked(username):
+            raise ApiError(429, "Too many wrong attempts. Try again in 15 minutes.")
+        conn = get_db()
+        row = conn.execute("SELECT * FROM users WHERE username = %s", (username,)).fetchone()
+        if not row or not verify_password(password, row["password_hash"]):
+            conn.close()
+            _failed_logins.setdefault(username, []).append(time.time())
+            raise ApiError(401, "Wrong username or password")
+        if not row["active"]:
+            conn.close()
+            raise ApiError(403, "This account is disabled. Ask your admin.")
+        _failed_logins.pop(username, None)
+
+        token = secrets.token_urlsafe(32)
+        now = datetime.now(timezone.utc)
+        conn.execute("DELETE FROM sessions WHERE expires_at < %s", (now.isoformat(),))
+        conn.execute(
+            "INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (%s, %s, %s, %s)",
+            (hash_token(token), row["id"], now.isoformat(), (now + timedelta(days=SESSION_DAYS)).isoformat()),
+        )
+        conn.execute("UPDATE users SET last_login_at = %s WHERE id = %s", (now.isoformat(), row["id"]))
+        conn.commit()
+        hub = conn.execute("SELECT name, code FROM hubs WHERE id = %s", (row["hub_id"],)).fetchone() if row["hub_id"] else None
+        conn.close()
+        user = {
+            "id": row["id"], "username": row["username"], "role": row["role"], "hub_id": row["hub_id"],
+            "view_hub_id": None, "hub_name": hub["name"] if hub else None, "hub_code": hub["code"] if hub else None,
+        }
+        self.send_json(200, self.me_payload(user), cookie=(token, SESSION_DAYS * 24 * 3600))
+
+    def logout(self):
+        token = self.session_token()
+        if token:
+            conn = get_db()
+            conn.execute("DELETE FROM sessions WHERE token_hash = %s", (hash_token(token),))
+            conn.commit()
+            conn.close()
+        self.send_json(200, {"ok": True}, cookie=("", 0))
+
+    def set_view_hub(self):
+        user = self.require_admin()
+        body = self.read_json_body()
+        hub_id = body.get("hubId")
+        conn = get_db()
+        if hub_id is not None:
+            try:
+                hub_id = int(hub_id)
+            except (TypeError, ValueError):
+                conn.close()
+                raise ApiError(400, "hubId must be a number or null")
+            if not conn.execute("SELECT id FROM hubs WHERE id = %s", (hub_id,)).fetchone():
+                conn.close()
+                raise ApiError(404, "Hub not found")
+        conn.execute(
+            "UPDATE sessions SET view_hub_id = %s WHERE token_hash = %s",
+            (hub_id, hash_token(self.session_token())),
+        )
+        conn.commit()
+        conn.close()
+        user["view_hub_id"] = hub_id
+        self.send_json(200, self.me_payload(user))
+
+    def list_users(self):
+        self.require_admin()
+        conn = get_db()
+        rows = conn.execute(USER_SELECT_SQL + "ORDER BY u.role, h.name NULLS LAST, u.username").fetchall()
+        conn.close()
+        self.send_json(200, [user_to_dict(r) for r in rows])
+
+    def create_user(self):
+        self.require_admin()
+        body = self.read_json_body()
+        username = normalize_username(body)
+        password = validate_password(body.get("password"))
+        role = body.get("role")
+        if role not in ("admin", "hub"):
+            raise ApiError(400, "role must be 'admin' or 'hub'")
+        conn = get_db()
+        hub_id = None
+        if role == "hub":
+            try:
+                hub_id = int(body.get("hubId"))
+            except (TypeError, ValueError):
+                conn.close()
+                raise ApiError(400, "Pick the hub this account belongs to")
+            if not conn.execute("SELECT id FROM hubs WHERE id = %s", (hub_id,)).fetchone():
+                conn.close()
+                raise ApiError(404, "Hub not found")
+            if conn.execute("SELECT id FROM users WHERE role = 'hub' AND hub_id = %s", (hub_id,)).fetchone():
+                conn.close()
+                raise ApiError(409, "That hub already has an account. Reset its password instead.")
+        if conn.execute("SELECT id FROM users WHERE username = %s", (username,)).fetchone():
+            conn.close()
+            raise ApiError(409, f"Username '{username}' is already taken")
+        new_id = conn.execute(
+            "INSERT INTO users (username, password_hash, role, hub_id, created_at) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (username, hash_password(password), role, hub_id, datetime.now(timezone.utc).isoformat()),
+        ).fetchone()["id"]
+        conn.commit()
+        row = conn.execute(USER_SELECT_SQL + "WHERE u.id = %s", (new_id,)).fetchone()
+        conn.close()
+        self.send_json(201, user_to_dict(row))
+
+    def update_user(self, user_id):
+        admin = self.require_admin()
+        body = self.read_json_body()
+        conn = get_db()
+        if not conn.execute("SELECT id FROM users WHERE id = %s", (user_id,)).fetchone():
+            conn.close()
+            raise ApiError(404, "Account not found")
+        if "password" in body:
+            password = validate_password(body.get("password"))
+            conn.execute("UPDATE users SET password_hash = %s WHERE id = %s", (hash_password(password), user_id))
+            # A reset signs the account out everywhere, so whoever had the old
+            # password loses access straight away.
+            conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+        if "active" in body:
+            active = bool(body.get("active"))
+            if not active and user_id == admin["id"]:
+                conn.close()
+                raise ApiError(400, "You can't disable your own account")
+            conn.execute("UPDATE users SET active = %s WHERE id = %s", (active, user_id))
+            if not active:
+                conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+        conn.commit()
+        row = conn.execute(USER_SELECT_SQL + "WHERE u.id = %s", (user_id,)).fetchone()
+        conn.close()
+        self.send_json(200, user_to_dict(row))
+
     # ---------- hubs ----------
     def list_hubs(self):
+        # Admins' hub switcher needs every hub, so only hub accounts get a filtered list.
+        user = self.require_user()
+        hub_sql, params = ("", []) if user["role"] == "admin" else (" AND id = %s", [user["hub_id"]])
         conn = get_db()
-        rows = conn.execute("SELECT * FROM hubs ORDER BY name").fetchall()
+        rows = conn.execute("SELECT * FROM hubs WHERE TRUE" + hub_sql + " ORDER BY name", tuple(params)).fetchall()
         conn.close()
         self.send_json(200, [hub_to_dict(r) for r in rows])
 
     def create_hub(self):
+        self.require_admin()
         body = self.read_json_body()
         name = require_str(body, "name")
         address = require_str(body, "address")
@@ -614,6 +1086,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(201, hub_to_dict(row))
 
     def delete_hub(self, hub_id):
+        self.require_admin()
         conn = get_db()
         row = conn.execute("SELECT id FROM hubs WHERE id = %s", (hub_id,)).fetchone()
         if not row:
@@ -625,6 +1098,9 @@ class Handler(BaseHTTPRequestHandler):
         if in_use:
             conn.close()
             raise ApiError(409, f"Can't delete — {in_use} shipment(s) still reference this hub")
+        if conn.execute("SELECT id FROM users WHERE hub_id = %s", (hub_id,)).fetchone():
+            conn.close()
+            raise ApiError(409, "Can't delete — this hub has a login account. Disable the account instead.")
         conn.execute("DELETE FROM hubs WHERE id = %s", (hub_id,))
         conn.commit()
         conn.close()
@@ -708,6 +1184,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(200, master_to_dict(row))
 
     def import_dump(self):
+        self.require_admin()
         body = self.read_json_body()
         rows = body.get("rows")
         if not isinstance(rows, list) or not rows:
@@ -782,6 +1259,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------- shipments ----------
     def list_shipments(self):
+        hub_sql, hub_params = self.hub_filter("s.hub_id")
         conn = get_db()
         rows = conn.execute(
             """
@@ -794,9 +1272,11 @@ class Handler(BaseHTTPRequestHandler):
             FROM shipments s
             JOIN hubs h ON h.id = s.hub_id
             JOIN vendors v ON v.id = s.vendor_id
+            WHERE TRUE {hub_sql}
             ORDER BY s.id DESC
             LIMIT 200
-            """
+            """.format(hub_sql=hub_sql),
+            tuple(hub_params),
         ).fetchall()
         conn.close()
         out = [
@@ -821,13 +1301,13 @@ class Handler(BaseHTTPRequestHandler):
     # (capped at 200, backs the small "recent shipments" widget), this has no
     # practical cap and supports a free-text search across invoice/vendor/hub.
     def list_shipments_archive(self, q):
+        hub_sql, params = self.hub_filter("s.hub_id")
         conn = get_db()
-        where_sql = ""
-        params = []
+        where_sql = "WHERE TRUE" + hub_sql
         if q:
-            where_sql = "WHERE s.invoice_no ILIKE %s OR v.name ILIKE %s OR h.name ILIKE %s"
+            where_sql += " AND (s.invoice_no ILIKE %s OR v.name ILIKE %s OR h.name ILIKE %s)"
             like = f"%{q}%"
-            params = [like, like, like]
+            params += [like, like, like]
         rows = conn.execute(
             f"""
             SELECT s.id, s.invoice_no, s.ship_date, s.created_at,
@@ -866,8 +1346,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def get_shipment(self, shipment_id):
         conn = get_db()
+        user = self.require_user()
         s = conn.execute("SELECT * FROM shipments WHERE id = %s", (shipment_id,)).fetchone()
-        if not s:
+        if not s or (user["role"] == "hub" and s["hub_id"] != user["hub_id"]):
             conn.close()
             raise ApiError(404, "Shipment not found")
         hub = conn.execute("SELECT * FROM hubs WHERE id = %s", (s["hub_id"],)).fetchone()
@@ -899,9 +1380,10 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def create_shipment(self):
+        user = self.require_user()
         body = self.read_json_body()
         try:
-            hub_id = int(body.get("hubId"))
+            hub_id = user["hub_id"] if user["role"] == "hub" else int(body.get("hubId"))
             vendor_id = int(body.get("vendorId"))
         except (TypeError, ValueError):
             raise ApiError(400, "hubId and vendorId are required")
@@ -966,7 +1448,8 @@ class Handler(BaseHTTPRequestHandler):
             "FROM shipments s JOIN vendors v ON v.id = s.vendor_id JOIN hubs h ON h.id = s.hub_id "
             "WHERE s.id NOT IN (SELECT shipment_id FROM courier_booking_shipments)"
         )
-        params = []
+        hub_sql, params = self.hub_filter("s.hub_id")
+        sql += hub_sql
         if q:
             sql += " AND (s.invoice_no ILIKE %s OR v.name ILIKE %s)"
             like = f"%{q}%"
@@ -992,6 +1475,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(200, out)
 
     def list_courier_bookings(self):
+        hub_sql, hub_params = self.hub_filter("b.hub_id")
         conn = get_db()
         rows = conn.execute(
             """
@@ -1007,10 +1491,12 @@ class Handler(BaseHTTPRequestHandler):
             LEFT JOIN hubs h ON h.id = b.hub_id
             JOIN courier_booking_shipments cbs ON cbs.booking_id = b.id
             JOIN shipments s ON s.id = cbs.shipment_id
+            WHERE TRUE {hub_sql}
             GROUP BY b.id, v.name, v.warehouse_label, v.pincode, v.contact_phone, v.address,
                      h.name, h.pincode, h.contact_name, h.phone, h.address
             ORDER BY b.id DESC
-            """
+            """.format(hub_sql=hub_sql),
+            tuple(hub_params),
         ).fetchall()
         conn.close()
         self.send_json(200, [courier_booking_to_dict(r) for r in rows])
@@ -1053,6 +1539,11 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
             raise ApiError(400, "All invoices in one booking must be picked up from the same hub")
         hub_id = hub_ids.pop()
+        try:
+            self.check_hub_access(hub_id)
+        except ApiError:
+            conn.close()
+            raise ApiError(400, "One or more shipmentIds don't exist")
 
         already_booked = conn.execute(
             f"SELECT shipment_id FROM courier_booking_shipments WHERE shipment_id IN ({placeholders})",
@@ -1078,8 +1569,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(201, {"id": booking_id})
 
     def delete_courier_booking(self, booking_id):
+        hub_sql, hub_params = self.hub_filter("hub_id")
         conn = get_db()
-        row = conn.execute("SELECT id FROM courier_bookings WHERE id = %s", (booking_id,)).fetchone()
+        row = conn.execute("SELECT id FROM courier_bookings WHERE id = %s" + hub_sql, (booking_id, *hub_params)).fetchone()
         if not row:
             conn.close()
             raise ApiError(404, "Booking not found")
@@ -1090,8 +1582,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def update_courier_booking(self, booking_id):
         body = self.read_json_body()
+        hub_sql, hub_params = self.hub_filter("hub_id")
         conn = get_db()
-        row = conn.execute("SELECT id FROM courier_bookings WHERE id = %s", (booking_id,)).fetchone()
+        row = conn.execute("SELECT id FROM courier_bookings WHERE id = %s" + hub_sql, (booking_id, *hub_params)).fetchone()
         if not row:
             conn.close()
             raise ApiError(404, "Booking not found")
@@ -1146,6 +1639,7 @@ class Handler(BaseHTTPRequestHandler):
     # invoice list is a string_agg across a GROUP BY, so it's simpler and
     # just as fast at this table's size to filter the already-built dicts.
     def export_courier_bookings_csv(self, status=None, q=None):
+        hub_sql, hub_params = self.hub_filter("b.hub_id")
         conn = get_db()
         rows = conn.execute(
             """
@@ -1161,10 +1655,12 @@ class Handler(BaseHTTPRequestHandler):
             LEFT JOIN hubs h ON h.id = b.hub_id
             JOIN courier_booking_shipments cbs ON cbs.booking_id = b.id
             JOIN shipments s ON s.id = cbs.shipment_id
+            WHERE TRUE {hub_sql}
             GROUP BY b.id, v.name, v.warehouse_label, v.pincode, v.contact_phone, v.address,
                      h.name, h.pincode, h.contact_name, h.phone, h.address
             ORDER BY b.id ASC
-            """
+            """.format(hub_sql=hub_sql),
+            tuple(hub_params),
         ).fetchall()
         conn.close()
 
@@ -1225,10 +1721,11 @@ class Handler(BaseHTTPRequestHandler):
     ]
 
     def fetch_report_rows(self, where_sql, params):
+        hub_sql, hub_params = self.hub_filter("b.hub_id")
         conn = get_db()
         rows = conn.execute(
-            self.REPORT_ROW_SQL + where_sql + " ORDER BY v.name, s.invoice_no, si.tracking_id",
-            params,
+            self.REPORT_ROW_SQL + where_sql + hub_sql + " ORDER BY v.name, s.invoice_no, si.tracking_id",
+            tuple(params) + tuple(hub_params),
         ).fetchall()
         conn.close()
         return [
@@ -1290,16 +1787,21 @@ class Handler(BaseHTTPRequestHandler):
         q = (q or "").strip()
         if not q:
             raise ApiError(400, "q is required")
+        hub_sql, hub_params = self.hub_filter("hub_id")
         conn = get_db()
 
         booking_id = None
         if q.isdigit():
-            row = conn.execute("SELECT id FROM courier_bookings WHERE id = %s", (int(q),)).fetchone()
+            row = conn.execute(
+                "SELECT id FROM courier_bookings WHERE id = %s" + hub_sql, (int(q), *hub_params)
+            ).fetchone()
             if row:
                 booking_id = row["id"]
 
         if booking_id is None:
-            srow = conn.execute("SELECT id FROM shipments WHERE invoice_no = %s", (q,)).fetchone()
+            srow = conn.execute(
+                "SELECT id FROM shipments WHERE invoice_no = %s" + hub_sql, (q, *hub_params)
+            ).fetchone()
             if not srow:
                 conn.close()
                 raise ApiError(404, f"No courier booking or invoice found for '{q}'")
@@ -1380,10 +1882,50 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(200, {"booking": booking, "invoices": invoices})
 
 
+def create_admin(username):
+    username = normalize_username({"username": username})
+    password = getpass.getpass(f"New password for admin '{username}': ")
+    if getpass.getpass("Type it again: ") != password:
+        sys.exit("Passwords don't match — nothing saved.")
+    validate_password(password)
+    init_db()
+    conn = get_db()
+    if conn.execute("SELECT id FROM users WHERE username = %s", (username,)).fetchone():
+        conn.close()
+        sys.exit(f"Username '{username}' already exists — reset its password from the Hub accounts screen.")
+    conn.execute(
+        "INSERT INTO users (username, password_hash, role, created_at) VALUES (%s, %s, 'admin', %s)",
+        (username, hash_password(password), datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    conn.close()
+    print(f"Admin '{username}' created in schema '{db_schema()}'.")
+
+
 def main():
+    load_dotenv()
+    schema = db_schema()
+    # Safety net while testing: off Render, refuse to touch the live
+    # ("public") tables unless that's explicitly asked for.
+    if schema == "public" and not os.environ.get("RENDER") and os.environ.get("ALLOW_PUBLIC_SCHEMA") != "1":
+        sys.exit(
+            "Refusing to start against the live 'public' schema from this machine. "
+            "Set DB_SCHEMA=rtv_test to test, or ALLOW_PUBLIC_SCHEMA=1 if you really mean live data."
+        )
+    if len(sys.argv) > 1 and sys.argv[1] == "create-admin":
+        if len(sys.argv) != 3:
+            sys.exit("Usage: python rtv-shipment-server.py create-admin <username>")
+        try:
+            create_admin(sys.argv[2])
+        except ApiError as e:
+            sys.exit(e.message)
+        return
     port = int(os.environ.get("PORT") or (sys.argv[1] if len(sys.argv) > 1 else DEFAULT_PORT))
     init_db()
-    server = HTTPServer(("0.0.0.0", port), Handler)
+    print(f"Database schema: {schema}")
+    # Threaded: browsers open idle pre-connections, which would block a
+    # single-threaded server for every other user until they time out.
+    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     print("RTV Scan-to-Pack app running:")
     print(f"  listening on 0.0.0.0:{port}")
     print("Press Ctrl+C to stop.")

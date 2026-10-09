@@ -134,11 +134,47 @@ table.data-table tr:hover td { background: var(--zebra); }
 .brand-panel-head b { font-size: 16px; }
 .brand-panel-head .meta { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
 
-/* ---- top navigation bar ---- */
-.topbar { display: flex; align-items: center; gap: 14px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--paper-raised); }
+/* ---- left sidebar navigation ---- */
+body.signed-in { padding-left: 232px; }
+.sidebar { position: fixed; top: 0; left: 0; bottom: 0; width: 232px; display: flex; flex-direction: column; gap: 18px; padding: 18px 14px; border-right: 1px solid var(--line); background: var(--paper-raised); overflow-y: auto; z-index: 20; }
+.sidebar-brand { display: flex; align-items: center; gap: 10px; padding: 0 6px; }
 .topbar-logo { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); color: var(--paper-raised); display: flex; align-items: center; justify-content: center; font-family: 'Space Grotesk',sans-serif; font-weight: 700; font-size: 12px; flex: none; }
 .topbar-word { font-size: 13.5px; font-weight: 700; letter-spacing: -0.01em; }
-.topbar .brand-tabs { margin: 0; }
+.side-nav { display: flex; flex-direction: column; gap: 2px; }
+.side-nav-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 10px 10px 4px; }
+.side-nav button { font: inherit; font-size: 13px; font-weight: 600; text-align: left; padding: 9px 10px; border-radius: 8px; border: none; background: none; color: var(--ink); cursor: pointer; }
+.side-nav button:hover { background: var(--zebra); }
+.side-nav button[aria-selected="true"] { background: var(--accent); color: #fff; }
+.sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px 6px 0; border-top: 1px solid var(--line); }
+.who-name { font-size: 13px; font-weight: 700; }
+.who-role { font-size: 11.5px; color: var(--muted); }
+.sidebar-foot select { font: inherit; font-size: 12.5px; padding: 7px 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); width: 100%; }
+.sidebar-foot label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+@media (max-width: 820px) {
+  body.signed-in { padding-left: 0; }
+  .sidebar { position: static; width: auto; bottom: auto; border-right: none; border-bottom: 1px solid var(--line); gap: 10px; }
+  .side-nav { flex-direction: row; overflow-x: auto; }
+  .side-nav-label { display: none; }
+  .side-nav button { white-space: nowrap; }
+  .sidebar-foot { margin-top: 0; flex-direction: row; flex-wrap: wrap; align-items: center; }
+}
+
+body:not(.is-admin) .admin-only { display: none !important; }
+
+/* ---- sign-in ---- */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.login-card { width: 100%; max-width: 360px; }
+.login-card .btn { width: 100%; margin-top: 6px; }
+.login-card .field { margin-bottom: 12px; }
+
+/* ---- hub accounts ---- */
+.pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--zebra); color: var(--muted); }
+.pill.good { color: var(--good); }
+.pill.warn { color: var(--warn); }
+.acct-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+.reset-row td { background: var(--zebra); }
+.reset-row .row-inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.reset-row input { max-width: 240px; }
 
 /* ---- print view chrome ---- */
 .print-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
@@ -214,7 +250,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 .invoice-foot { font-size: 10px; color: #6B6B6B; padding-top: 8px; border-top: 1px dashed #B0B0B0; }
 
 @media print {
-  body { padding: 0; background: #fff; }
+  body, body.signed-in { padding: 0; background: #fff; }
   .no-print { display: none !important; }
   .stage { padding: 0; background: #fff; border: none; border-radius: 0; gap: 0; }
   .sheet { box-shadow: none; }
@@ -228,15 +264,43 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 </head>
 <body>
 
-<div class="topbar no-print">
-  <div class="topbar-logo">Z</div>
-  <div class="topbar-word">Zilo RTV Console</div>
-  <div class="brand-tabs" id="topTabs" role="tablist">
+<div class="login-wrap" id="loginView" style="display:none;">
+  <form class="card login-card" id="loginForm" novalidate>
+    <p class="eyebrow">Zilo · Return to vendor</p>
+    <h2 style="font-size:20px; margin-bottom:16px;">Sign in</h2>
+    <div class="field"><label for="loginUsername">Username</label><input id="loginUsername" autocomplete="username" autocapitalize="none" spellcheck="false"></div>
+    <div class="field"><label for="loginPassword">Password</label><input id="loginPassword" type="password" autocomplete="current-password"></div>
+    <p class="field-error" id="loginError"></p>
+    <button type="submit" class="btn" id="loginBtn">Sign in</button>
+    <p class="hint" style="margin:14px 0 0;">Forgot your password? Ask your admin to reset it.</p>
+  </form>
+</div>
+
+<nav class="sidebar no-print" id="sidebar" style="display:none;">
+  <div class="sidebar-brand">
+    <div class="topbar-logo">Z</div>
+    <div class="topbar-word">Zilo RTV Console</div>
+  </div>
+  <div class="side-nav" id="topTabs" role="tablist" aria-orientation="vertical">
+    <div class="side-nav-label">Shipments</div>
     <button type="button" id="tabPackShipments" aria-selected="true">Pack shipments</button>
     <button type="button" id="tabShipmentArchive" aria-selected="false">Shipment archive</button>
     <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings</button>
+    <div class="side-nav-label admin-only">Admin</div>
+    <button type="button" id="tabHubAccounts" class="admin-only" aria-selected="false">Hub accounts</button>
   </div>
-</div>
+  <div class="sidebar-foot">
+    <div>
+      <div class="who-name" id="whoName"></div>
+      <div class="who-role" id="whoRole"></div>
+    </div>
+    <div class="admin-only" style="display:flex; flex-direction:column; gap:4px;">
+      <label for="viewHubSelect">Viewing</label>
+      <select id="viewHubSelect"></select>
+    </div>
+    <button type="button" class="link-btn" id="signOutBtn">Sign out</button>
+  </div>
+</nav>
 
 <div class="app-shell" id="formView">
   <div class="app-head">
@@ -250,31 +314,15 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <h2>Shipping details</h2>
     <div class="field-grid">
       <div class="field">
-        <label for="hubSelect">Shipping from</label>
-        <div class="row-inline">
-          <select id="hubSelect"></select>
-          <button type="button" class="link-btn" id="toggleNewHub" style="white-space:nowrap;">+ New hub</button>
-        </div>
+        <label>Shipping from</label>
+        <div id="shippingFromText" style="font-size:13.5px; font-weight:700; padding:9px 0;"></div>
       </div>
       <div class="field"><label for="shipDateInput">Ship date</label><input id="shipDateInput" type="date"></div>
     </div>
-
-    <div class="inline-form" id="newHubForm">
-      <div class="field"><label>Hub name</label><input id="nh-name" placeholder="Zilo Ghatkopar Return Hub"></div>
-      <div class="field"><label>Short code</label><input id="nh-code" placeholder="GHK" maxlength="6"></div>
-      <div class="field span-2"><label>Address</label><input id="nh-address" placeholder="Unit 4, Everest Industrial Estate, LBS Marg, Ghatkopar (W), Mumbai 400086"></div>
-      <div class="field"><label>Phone</label><input id="nh-phone" placeholder="+91 22 6801 4400"></div>
-      <div class="field"><label>Contact name</label><input id="nh-contactName" placeholder="Aakash Narwade"></div>
-      <div class="field"><label>Contact email</label><input id="nh-contactEmail" type="email" placeholder="zilo_ghatkopar_ds@zilo.one"></div>
-      <div class="field"><label>Pincode</label><input id="nh-pincode" placeholder="400086 (auto-detected from address if left blank)"></div>
-      <div class="actions">
-        <button type="button" class="btn small" id="saveHub">Save hub</button>
-        <button type="button" class="btn small secondary" id="cancelHub">Cancel</button>
-      </div>
-    </div>
+    <p class="field-error" id="shippingFromHint"></p>
   </div>
 
-  <div class="card">
+  <div class="card admin-only">
     <h2>Import daily dump</h2>
     <p class="hint">Upload today's tracking dump (CSV, header row required): <b>Tracking ID, Marketplace Order ID, Return ID, Seller name, RTV Shipment ID, TMS Provider name, RTV Shipment Status, RTV Created At, RTV tracking id, Value, Order set ID</b>. A Tracking ID already in the database gets all its fields updated to the new values; a new Tracking ID is added. Only Tracking ID, Value and Qty (scanned at 1 per item) show up on the printed invoice — everything else is kept for reference. <button type="button" class="link-btn" id="downloadSampleDumpCsv" style="display:inline; white-space:nowrap;">Download sample CSV</button></p>
     <input type="file" id="dumpFileInput" accept=".csv,text/csv">
@@ -483,6 +531,67 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   </div>
 </div>
 
+<div class="app-shell" id="hubAccountsView" style="display:none; max-width: 1040px;">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · admin</p>
+      <h1>Hub accounts</h1>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap;">
+      <h2>Accounts</h2>
+      <button type="button" class="btn small" id="toggleNewAccount">+ New account</button>
+    </div>
+    <p class="hint">One login per hub, plus admin logins. Hub accounts only see their own hub's data. Resetting a password or disabling an account signs it out everywhere straight away.</p>
+
+    <div class="inline-form" id="newAccountForm">
+      <div class="field"><label for="na-role">Account type</label>
+        <select id="na-role"><option value="hub">Hub</option><option value="admin">Admin</option></select>
+      </div>
+      <div class="field" id="na-hubField"><label for="na-hub">Hub</label>
+        <select id="na-hub"></select>
+      </div>
+      <div class="field"><label for="na-username">Username</label><input id="na-username" placeholder="ghatkopar" autocapitalize="none" spellcheck="false"></div>
+      <div class="field"><label for="na-password">Password</label><input id="na-password" type="text" autocomplete="new-password" placeholder="At least 8 characters"></div>
+      <p class="field-error span-2" id="newAccountError" style="grid-column:1/-1;"></p>
+      <div class="actions">
+        <button type="button" class="btn small" id="saveAccount">Create account</button>
+        <button type="button" class="btn small secondary" id="cancelAccount">Cancel</button>
+      </div>
+    </div>
+
+    <div class="table-wrap" style="margin-top:14px;">
+      <table class="data-table"><thead><tr><th>Hub</th><th>Username</th><th>Type</th><th>Status</th><th>Last sign-in</th><th>Actions</th></tr></thead><tbody id="accountsBody"></tbody></table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap;">
+      <h2>Hubs</h2>
+      <button type="button" class="btn small secondary" id="toggleNewHub">+ New hub</button>
+    </div>
+    <p class="hint">A hub needs to exist here before it can get an account. Its address and contact show on labels, invoices and DTDC bookings.</p>
+    <div class="inline-form" id="newHubForm">
+      <div class="field"><label>Hub name</label><input id="nh-name" placeholder="Zilo Ghatkopar Return Hub"></div>
+      <div class="field"><label>Short code</label><input id="nh-code" placeholder="GHK" maxlength="6"></div>
+      <div class="field span-2"><label>Address</label><input id="nh-address" placeholder="Unit 4, Everest Industrial Estate, LBS Marg, Ghatkopar (W), Mumbai 400086"></div>
+      <div class="field"><label>Phone</label><input id="nh-phone" placeholder="+91 22 6801 4400"></div>
+      <div class="field"><label>Contact name</label><input id="nh-contactName" placeholder="Aakash Narwade"></div>
+      <div class="field"><label>Contact email</label><input id="nh-contactEmail" type="email" placeholder="zilo_ghatkopar_ds@zilo.one"></div>
+      <div class="field"><label>Pincode</label><input id="nh-pincode" placeholder="400086 (auto-detected from address if left blank)"></div>
+      <div class="actions">
+        <button type="button" class="btn small" id="saveHub">Save hub</button>
+        <button type="button" class="btn small secondary" id="cancelHub">Cancel</button>
+      </div>
+    </div>
+    <div class="table-wrap" style="margin-top:14px;">
+      <table class="data-table"><thead><tr><th>Hub</th><th>Code</th><th>Address</th><th>Contact</th><th>Account</th></tr></thead><tbody id="hubsBody"></tbody></table>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -495,6 +604,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   // kept in localStorage anymore, so the data survives clearing browser data.
   function fetchJson(url, opts) {
     return fetch(url, opts).then(function (res) {
+      if (res.status === 401 && url !== "/api/login" && url !== "/api/me") showLogin();
       return res.json().catch(function () { return {}; }).then(function (data) {
         if (!res.ok) throw new Error((data && data.error) || ("Request failed (" + res.status + ")"));
         return data;
@@ -507,6 +617,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   }
 
   var state = {
+    me: null, // { user: {id, username, role, hubId, hubName, hubCode}, viewHubId } from /api/me
     hubs: [],
     vendors: [],
     emailTemplate: null, // { subject, body } — fetched at init, kept fresh after saving edits
@@ -549,8 +660,37 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     if (current) select.value = current;
   }
 
-  function refreshHubSelect() {
-    fillSelect(document.getElementById("hubSelect"), state.hubs, function (h) { return h.name + " (" + h.code + ")"; });
+  function isAdmin() { return !!(state.me && state.me.user.role === "admin"); }
+
+  // The hub new shipments are packed from: a hub account's own hub, or the
+  // hub an admin has picked under "Viewing" (none while viewing all hubs).
+  function packingHub() {
+    if (!state.me) return null;
+    var id = state.me.viewHubId;
+    return state.hubs.find(function (h) { return h.id === id; }) || null;
+  }
+
+  function refreshShippingFrom() {
+    var hub = packingHub();
+    document.getElementById("shippingFromText").textContent = hub ? hub.name + " (" + hub.code + ")" : "—";
+    document.getElementById("shippingFromHint").textContent =
+      hub ? "" : "You're viewing all hubs. Pick a hub under Viewing in the sidebar to pack a shipment.";
+  }
+
+  function refreshViewHubSelect() {
+    var select = document.getElementById("viewHubSelect");
+    select.innerHTML = "";
+    var all = document.createElement("option");
+    all.value = "";
+    all.textContent = "All hubs";
+    select.appendChild(all);
+    state.hubs.forEach(function (h) {
+      var opt = document.createElement("option");
+      opt.value = h.id;
+      opt.textContent = h.name;
+      select.appendChild(opt);
+    });
+    select.value = state.me && state.me.viewHubId ? String(state.me.viewHubId) : "";
   }
   function vendorLabel(v) {
     return v.name + (v.shortName ? " (" + v.shortName + ")" : "") + (v.warehouseLabel ? " — " + v.warehouseLabel : "");
@@ -580,8 +720,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     })
       .then(function (hub) {
         state.hubs.push(hub);
-        refreshHubSelect();
-        document.getElementById("hubSelect").value = hub.id;
+        state.hubs.sort(function (a, b) { return a.name.localeCompare(b.name); });
+        refreshViewHubSelect();
+        renderAccounts();
         document.getElementById("newHubForm").classList.remove("is-open");
         ["nh-name", "nh-code", "nh-address", "nh-phone", "nh-contactName", "nh-contactEmail", "nh-pincode"].forEach(function (id) { document.getElementById(id).value = ""; });
         toast("Hub saved: " + hub.name);
@@ -1964,11 +2105,12 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   });
 
   document.getElementById("finishShipmentBtn").addEventListener("click", function () {
-    var hubId = document.getElementById("hubSelect").value;
+    var packHub = packingHub();
+    var hubId = packHub ? packHub.id : "";
     var shipDate = document.getElementById("shipDateInput").value;
     var scanErrEl = document.getElementById("scanError");
     scanErrEl.textContent = "";
-    if (!hubId) { scanErrEl.textContent = "Pick or add a hub above first."; return; }
+    if (!hubId) { scanErrEl.textContent = "Pick a hub under Viewing in the sidebar first."; return; }
     if (!shipDate) { scanErrEl.textContent = "Ship date is required."; return; }
 
     if (currentBox.length) {
@@ -1978,7 +2120,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     }
     if (closedBoxes.length === 0) { scanErrEl.textContent = "Scan and close at least one box first."; return; }
 
-    var hub = state.hubs.find(function (h) { return String(h.id) === String(hubId); });
+    var hub = packHub;
     var byVendor = {}; // vendorId -> { vendor, items }
     closedBoxes.forEach(function (box) {
       box.items.forEach(function (it) {
@@ -2479,23 +2621,29 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     document.getElementById("courierBookingsView").style.display = "none";
     document.getElementById("printView").style.display = "none";
     document.getElementById("batchView").style.display = "none";
+    document.getElementById("hubAccountsView").style.display = "none";
     document.getElementById("tabPackShipments").setAttribute("aria-selected", "false");
     document.getElementById("tabShipmentArchive").setAttribute("aria-selected", "false");
     document.getElementById("tabCourierBookings").setAttribute("aria-selected", "false");
+    document.getElementById("tabHubAccounts").setAttribute("aria-selected", "false");
   }
+  var currentTabShow = null; // re-run after the admin's Viewing hub changes
   function showCourierBookingsView() {
+    currentTabShow = showCourierBookingsView;
     hideAllTabViews();
     document.getElementById("courierBookingsView").style.display = "block";
     document.getElementById("tabCourierBookings").setAttribute("aria-selected", "true");
     if (!cbLoaded) { cbLoaded = true; cbRenderBookings(); }
   }
   function showPackShipmentsView() {
+    currentTabShow = showPackShipmentsView;
     hideAllTabViews();
     document.getElementById("formView").style.display = "block";
     document.getElementById("tabPackShipments").setAttribute("aria-selected", "true");
     renderRecent();
   }
   function showShipmentArchiveView() {
+    currentTabShow = showShipmentArchiveView;
     hideAllTabViews();
     document.getElementById("shipmentArchiveView").style.display = "block";
     document.getElementById("tabShipmentArchive").setAttribute("aria-selected", "true");
@@ -2505,24 +2653,235 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   document.getElementById("tabPackShipments").addEventListener("click", showPackShipmentsView);
   document.getElementById("tabShipmentArchive").addEventListener("click", showShipmentArchiveView);
 
+  // ================= hub accounts (admin) =================
+  var accounts = [];
+  function showHubAccountsView() {
+    currentTabShow = showHubAccountsView;
+    hideAllTabViews();
+    document.getElementById("hubAccountsView").style.display = "block";
+    document.getElementById("tabHubAccounts").setAttribute("aria-selected", "true");
+    loadAccounts();
+  }
+  document.getElementById("tabHubAccounts").addEventListener("click", showHubAccountsView);
+
+  function loadAccounts() {
+    return getJson("/api/users")
+      .then(function (rows) { accounts = rows; renderAccounts(); })
+      .catch(function (err) { toast("Couldn't load accounts: " + err.message, true); });
+  }
+
+  function formatDateTime(iso) {
+    if (!iso) return "Never";
+    var d = new Date(iso);
+    if (isNaN(d)) return iso;
+    return d.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function patchAccount(id, body, okMessage) {
+    return fetchJson("/api/users/" + id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(function () { toast(okMessage); return loadAccounts(); })
+      .catch(function (err) { toast(err.message, true); });
+  }
+
+  function renderAccounts() {
+    var body = document.getElementById("accountsBody");
+    body.innerHTML = "";
+    accounts.forEach(function (a) {
+      var tr = document.createElement("tr");
+      var hubCell = a.role === "hub" ? escapeHtml(a.hubName) + " · " + escapeHtml(a.hubCode) : "—";
+      var status = a.active ? "<span class='pill good'>Active</span>" : "<span class='pill warn'>Disabled</span>";
+      tr.innerHTML =
+        "<td>" + hubCell + "</td><td class='mono'>" + escapeHtml(a.username) + "</td>" +
+        "<td>" + (a.role === "admin" ? "Admin" : "Hub") + "</td><td>" + status + "</td>" +
+        "<td>" + escapeHtml(formatDateTime(a.lastLoginAt)) + "</td><td><div class='acct-actions'></div></td>";
+      var actions = tr.querySelector(".acct-actions");
+
+      var resetBtn = document.createElement("button");
+      resetBtn.type = "button";
+      resetBtn.className = "link-btn";
+      resetBtn.textContent = "Reset password";
+      resetBtn.addEventListener("click", function () {
+        var existing = body.querySelector(".reset-row[data-for='" + a.id + "']");
+        if (existing) { existing.remove(); return; }
+        var row = document.createElement("tr");
+        row.className = "reset-row";
+        row.setAttribute("data-for", a.id);
+        row.innerHTML = "<td colspan='6'><div class='row-inline'><span style='font-size:12.5px;'>New password for <b>" + escapeHtml(a.username) +
+          "</b></span><input type='text' autocomplete='new-password' placeholder='At least 8 characters'>" +
+          "<button type='button' class='btn small'>Save</button><span class='field-error'></span></div></td>";
+        var input = row.querySelector("input");
+        var err = row.querySelector(".field-error");
+        input.addEventListener("input", function () { err.textContent = ""; });
+        row.querySelector("button").addEventListener("click", function () {
+          if (input.value.length < 8) { err.textContent = "Use at least 8 characters."; return; }
+          patchAccount(a.id, { password: input.value }, "Password reset for " + a.username);
+        });
+        tr.after(row);
+        input.focus();
+      });
+      actions.appendChild(resetBtn);
+
+      if (!(state.me && a.id === state.me.user.id)) {
+        var toggleBtn = document.createElement("button");
+        toggleBtn.type = "button";
+        toggleBtn.className = "link-btn";
+        toggleBtn.textContent = a.active ? "Disable" : "Enable";
+        toggleBtn.addEventListener("click", function () {
+          if (a.active && !window.confirm("Disable " + a.username + "? They'll be signed out and can't sign in until re-enabled.")) return;
+          patchAccount(a.id, { active: !a.active }, (a.active ? "Disabled " : "Enabled ") + a.username);
+        });
+        actions.appendChild(toggleBtn);
+      }
+      body.appendChild(tr);
+    });
+    if (!accounts.length) body.innerHTML = "<tr><td colspan='6' class='empty-state'>No accounts yet.</td></tr>";
+
+    // Hubs table + the hub dropdown in the new-account form
+    var hubBody = document.getElementById("hubsBody");
+    hubBody.innerHTML = "";
+    var hubAccount = {};
+    accounts.forEach(function (a) { if (a.role === "hub") hubAccount[a.hubId] = a; });
+    state.hubs.forEach(function (h) {
+      var tr = document.createElement("tr");
+      var acct = hubAccount[h.id];
+      tr.innerHTML = "<td>" + escapeHtml(h.name) + "</td><td class='mono'>" + escapeHtml(h.code) + "</td>" +
+        "<td>" + escapeHtml(h.address) + "</td><td>" + escapeHtml([h.contactName, h.phone].filter(Boolean).join(" · ")) + "</td>" +
+        "<td>" + (acct ? "<span class='mono'>" + escapeHtml(acct.username) + "</span>" : "<span class='pill warn'>No account</span>") + "</td>";
+      hubBody.appendChild(tr);
+    });
+
+    var hubSelect = document.getElementById("na-hub");
+    var free = state.hubs.filter(function (h) { return !hubAccount[h.id]; });
+    hubSelect.innerHTML = "";
+    if (!free.length) {
+      hubSelect.innerHTML = "<option value=''>Every hub already has an account</option>";
+    }
+    free.forEach(function (h) {
+      var opt = document.createElement("option");
+      opt.value = h.id;
+      opt.textContent = h.name + " (" + h.code + ")";
+      hubSelect.appendChild(opt);
+    });
+  }
+
+  wireToggle("toggleNewAccount", "newAccountForm");
+  document.getElementById("cancelAccount").addEventListener("click", function () {
+    document.getElementById("newAccountForm").classList.remove("is-open");
+  });
+  document.getElementById("na-role").addEventListener("change", function () {
+    document.getElementById("na-hubField").style.display = this.value === "hub" ? "" : "none";
+  });
+  ["na-username", "na-password", "na-hub", "na-role"].forEach(function (id) {
+    document.getElementById(id).addEventListener("input", function () { document.getElementById("newAccountError").textContent = ""; });
+  });
+  document.getElementById("saveAccount").addEventListener("click", function () {
+    var errEl = document.getElementById("newAccountError");
+    errEl.textContent = "";
+    var role = document.getElementById("na-role").value;
+    var hubId = document.getElementById("na-hub").value;
+    var username = document.getElementById("na-username").value.trim().toLowerCase();
+    var password = document.getElementById("na-password").value;
+    if (role === "hub" && !hubId) { errEl.textContent = "Pick the hub this account is for (add the hub below first if it's missing)."; return; }
+    if (!/^[a-z0-9._-]{3,40}$/.test(username)) { errEl.textContent = "Username: 3-40 letters, numbers, dot, dash or underscore."; return; }
+    if (password.length < 8) { errEl.textContent = "Password needs at least 8 characters."; return; }
+    postJson("/api/users", { role: role, hubId: role === "hub" ? Number(hubId) : null, username: username, password: password })
+      .then(function (created) {
+        ["na-username", "na-password"].forEach(function (id) { document.getElementById(id).value = ""; });
+        document.getElementById("newAccountForm").classList.remove("is-open");
+        toast("Account created: " + created.username);
+        return loadAccounts();
+      })
+      .catch(function (err) { errEl.textContent = err.message; });
+  });
+
+  // ================= session =================
+  function showLogin() {
+    state.me = null;
+    document.body.classList.remove("signed-in", "is-admin");
+    document.getElementById("sidebar").style.display = "none";
+    hideAllTabViews();
+    document.getElementById("loginView").style.display = "flex";
+    document.getElementById("loginPassword").value = "";
+    document.getElementById("loginUsername").focus();
+  }
+
+  function applyMe(me) {
+    state.me = me;
+    var u = me.user;
+    document.body.classList.add("signed-in");
+    document.body.classList.toggle("is-admin", u.role === "admin");
+    document.getElementById("whoName").textContent = u.role === "admin" ? u.username : u.hubName;
+    document.getElementById("whoRole").textContent = u.role === "admin" ? "Admin · all hubs" : "Hub account · " + u.username;
+  }
+
+  document.getElementById("loginForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var errEl = document.getElementById("loginError");
+    var username = document.getElementById("loginUsername").value.trim();
+    var password = document.getElementById("loginPassword").value;
+    if (!username) { errEl.textContent = "Enter your username."; return; }
+    if (!password) { errEl.textContent = "Enter your password."; return; }
+    var btn = document.getElementById("loginBtn");
+    btn.disabled = true;
+    postJson("/api/login", { username: username, password: password })
+      .then(function (me) { errEl.textContent = ""; startApp(me); })
+      .catch(function (err) { errEl.textContent = err.message; })
+      .then(function () { btn.disabled = false; });
+  });
+  ["loginUsername", "loginPassword"].forEach(function (id) {
+    document.getElementById(id).addEventListener("input", function () { document.getElementById("loginError").textContent = ""; });
+  });
+
+  document.getElementById("signOutBtn").addEventListener("click", function () {
+    postJson("/api/logout", {}).catch(function () {}).then(function () { location.reload(); });
+  });
+
+  document.getElementById("viewHubSelect").addEventListener("change", function () {
+    var select = this;
+    var hasPacking = currentBox.length || closedBoxes.length;
+    if (hasPacking && !window.confirm("You have boxes packed but not finished. Switching hub changes where they ship from. Switch anyway?")) {
+      select.value = state.me.viewHubId ? String(state.me.viewHubId) : "";
+      return;
+    }
+    postJson("/api/view-hub", { hubId: select.value ? Number(select.value) : null })
+      .then(function (me) {
+        applyMe(me);
+        refreshShippingFrom();
+        cbLoaded = false;
+        if (currentTabShow) currentTabShow();
+      })
+      .catch(function (err) { toast("Couldn't switch hub: " + err.message, true); });
+  });
+
+  function startApp(me) {
+    applyMe(me);
+    document.getElementById("loginView").style.display = "none";
+    document.getElementById("sidebar").style.display = "";
+    Promise.all([getJson("/api/hubs"), getJson("/api/vendors"), getJson("/api/email-template")])
+      .then(function (results) {
+        state.hubs = results[0];
+        state.vendors = results[1];
+        state.emailTemplate = results[2];
+        refreshViewHubSelect();
+        refreshShippingFrom();
+        renderBoxVendorPicker();
+        showPackShipmentsView();
+      })
+      .catch(function (err) {
+        toast("Couldn't reach the server: " + err.message, true);
+      });
+  }
+
   // ================= init =================
   function initApp() {
     document.getElementById("shipDateInput").value = new Date().toISOString().slice(0, 10);
     boxNo = 1;
     renderCurrentBox();
     renderClosedBoxes();
-    Promise.all([getJson("/api/hubs"), getJson("/api/vendors"), getJson("/api/email-template")])
-      .then(function (results) {
-        state.hubs = results[0];
-        state.vendors = results[1];
-        state.emailTemplate = results[2];
-        refreshHubSelect();
-        renderBoxVendorPicker();
-        renderRecent();
-      })
-      .catch(function (err) {
-        toast("Couldn't reach the server: " + err.message, true);
-      });
+    fetch("/api/me").then(function (res) {
+      if (!res.ok) { showLogin(); return; }
+      return res.json().then(startApp);
+    }).catch(function () { showLogin(); });
   }
   initApp();
 })();
