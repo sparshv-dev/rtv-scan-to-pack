@@ -9,8 +9,12 @@ Local run:  DATABASE_URL=postgresql://... python rtv-shipment-server.py [port]
 Hosted (Render): reads DATABASE_URL and PORT from the environment.
 First admin:  python rtv-shipment-server.py create-admin <username>
 """
+import csv
+import email.parser
+import email.policy
 import getpass
 import hashlib
+import io
 import hmac
 import json
 import os
@@ -19,11 +23,13 @@ import secrets
 import sys
 import threading
 import time
+import zipfile
 from datetime import datetime, timedelta, timezone
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
+from xml.etree import ElementTree
 
 import psycopg2
 import psycopg2.extras
@@ -414,6 +420,57 @@ def init_db():
             expires_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+        -- Daily full returns dump (every return, consolidated or not). One row
+        -- per Return Tracking ID + SKU: a single return can carry several SKUs.
+        -- Re-importing is an upsert, and a row only changes when the file's
+        -- "Updated At" is newer than what's stored, so re-uploads and older
+        -- files can never duplicate or roll back data.
+        ALTER TABLE hubs ADD COLUMN IF NOT EXISTS dump_name TEXT;
+        CREATE TABLE IF NOT EXISTS returns (
+            return_tracking_id TEXT NOT NULL,
+            sku TEXT NOT NULL DEFAULT '',
+            forward_tracking_id TEXT,
+            marketplace_order_id TEXT,
+            return_type TEXT,
+            return_reason TEXT,
+            return_status TEXT,
+            sale_price NUMERIC,
+            hub_name TEXT,
+            hub_id INTEGER REFERENCES hubs(id) ON DELETE SET NULL,
+            return_created_at TIMESTAMPTZ,
+            picked_up_at TIMESTAMPTZ,
+            checked_in_at TIMESTAMPTZ,
+            consolidated_at TIMESTAMPTZ,
+            dispatched_at TIMESTAMPTZ,
+            rtv_delivered_at TIMESTAMPTZ,
+            source_updated_at TIMESTAMPTZ,
+            rtv_shipment_status TEXT,
+            seller_name TEXT,
+            return_location_name TEXT,
+            first_import_id INTEGER,
+            last_import_id INTEGER,
+            PRIMARY KEY (return_tracking_id, sku)
+        );
+        CREATE INDEX IF NOT EXISTS idx_returns_forward_tracking_id ON returns(forward_tracking_id);
+        CREATE INDEX IF NOT EXISTS idx_returns_hub_id ON returns(hub_id);
+        CREATE TABLE IF NOT EXISTS dump_imports (
+            id SERIAL PRIMARY KEY,
+            source TEXT NOT NULL,
+            filename TEXT,
+            uploaded_by TEXT,
+            created_at TEXT NOT NULL,
+            total_rows INTEGER NOT NULL DEFAULT 0,
+            blank_rows INTEGER NOT NULL DEFAULT 0,
+            invalid_rows INTEGER NOT NULL DEFAULT 0,
+            duplicate_rows INTEGER NOT NULL DEFAULT 0,
+            inserted INTEGER NOT NULL DEFAULT 0,
+            updated INTEGER NOT NULL DEFAULT 0,
+            unchanged INTEGER NOT NULL DEFAULT 0,
+            stale INTEGER NOT NULL DEFAULT 0,
+            unmatched_hubs TEXT,
+            error TEXT
+        );
+        ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS sku TEXT;
         """
     )
     conn.commit()
@@ -472,7 +529,164 @@ def hub_to_dict(row):
     return {
         "id": row["id"], "name": row["name"], "code": row["code"], "address": row["address"], "phone": row["phone"],
         "contactName": row["contact_name"], "contactEmail": row["contact_email"], "pincode": row["pincode"],
+        "dumpName": row.get("dump_name"),
     }
+
+
+# ---------- daily returns dump ----------
+# Only these columns are kept from the HMS returns export; anything else in
+# the file (Pickup Due By, Arrived At, Bin Assigned At, Bin ID, ...) is
+# ignored. Header matching ignores case, spaces and punctuation.
+DUMP_COLUMNS = [
+    # (db column, header in the file, kind)
+    ("marketplace_order_id", "Marketplace Order ID", "text"),
+    ("forward_tracking_id", "Forward Tracking ID", "text"),
+    ("return_tracking_id", "Return Tracking ID", "text"),
+    ("return_type", "Return Type", "text"),
+    ("return_reason", "Return_Reason", "text"),
+    ("return_status", "Return Status", "text"),
+    ("sku", "SKU", "text"),
+    ("sale_price", "Sale Price", "number"),
+    ("hub_name", "Hub Name", "text"),
+    ("return_created_at", "Return Created At", "time"),
+    ("picked_up_at", "Picked Up At", "time"),
+    ("checked_in_at", "Checked In At", "time"),
+    ("consolidated_at", "Consolidated At", "time"),
+    ("dispatched_at", "Dispatched At", "time"),
+    ("rtv_delivered_at", "RTV Delivered At", "time"),
+    ("source_updated_at", "Updated At", "time"),
+    ("rtv_shipment_status", "rtv_shipment_status", "text"),
+    ("seller_name", "Seller Name", "text"),
+    ("return_location_name", "Return Location Name", "text"),
+]
+DUMP_REQUIRED_HEADERS = ["Return Tracking ID", "SKU", "Return Type", "Hub Name", "Return Created At", "Picked Up At", "Updated At"]
+MAX_UPLOAD_BYTES = 60 * 1024 * 1024
+HUB_NAME_NOISE = {"zilo", "hub", "return", "returns", "warehouse", "the", "store"}
+
+
+def norm_header(h):
+    return re.sub(r"[^a-z0-9]", "", (h or "").lower())
+
+
+def hub_tokens(name):
+    return {w for w in re.findall(r"[a-z]+", (name or "").lower()) if w not in HUB_NAME_NOISE}
+
+
+def parse_time(v):
+    v = (v or "").strip()
+    if not v:
+        return None
+    try:
+        dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=IST)  # the HMS export is IST
+    return dt
+
+
+def parse_number(v):
+    v = re.sub(r"[^0-9.\-]", "", v or "")
+    try:
+        return float(v) if v else None
+    except ValueError:
+        return None
+
+
+def xlsx_rows(data):
+    """First worksheet of an .xlsx as lists of strings — stdlib only, so the
+    Google Form can take a spreadsheet as well as a CSV."""
+    ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        shared = []
+        if "xl/sharedStrings.xml" in z.namelist():
+            root = ElementTree.fromstring(z.read("xl/sharedStrings.xml"))
+            for si in root.findall("m:si", ns):
+                shared.append("".join(t.text or "" for t in si.iter("{%s}t" % ns["m"])))
+        sheets = sorted(n for n in z.namelist() if re.match(r"xl/worksheets/sheet\d+\.xml$", n))
+        if not sheets:
+            raise ApiError(400, "That spreadsheet has no sheets")
+        root = ElementTree.fromstring(z.read(sheets[0]))
+    rows = []
+    for row in root.iter("{%s}row" % ns["m"]):
+        out = {}
+        for c in row.findall("m:c", ns):
+            ref = c.get("r", "")
+            letters = re.match(r"[A-Z]+", ref)
+            col = 0
+            for ch in (letters.group(0) if letters else ""):
+                col = col * 26 + (ord(ch) - 64)
+            col = col - 1 if col else len(out)
+            t = c.get("t")
+            v = c.find("m:v", ns)
+            if t == "s" and v is not None:
+                val = shared[int(v.text)]
+            elif t == "inlineStr":
+                val = "".join(x.text or "" for x in c.iter("{%s}t" % ns["m"]))
+            else:
+                val = v.text if v is not None and v.text is not None else ""
+            out[col] = val
+        rows.append([out.get(i, "") for i in range(max(out) + 1)] if out else [])
+    return rows
+
+
+def file_rows(data, filename):
+    if data[:2] == b"PK" or (filename or "").lower().endswith(".xlsx"):
+        try:
+            return xlsx_rows(data)
+        except zipfile.BadZipFile:
+            raise ApiError(400, "That file looks like a spreadsheet but couldn't be opened")
+    for enc in ("utf-8-sig", "cp1252"):
+        try:
+            text = data.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    return list(csv.reader(io.StringIO(text)))
+
+
+def prepare_dump(rows):
+    """Header check, column pick, blank/invalid skip and in-file de-duplication.
+    Returns (records keyed by (return_tracking_id, sku), stats)."""
+    if not rows:
+        raise ApiError(400, "The file is empty")
+    header = [norm_header(h) for h in rows[0]]
+    index = {}
+    for col, label, _kind in DUMP_COLUMNS:
+        key = norm_header(label)
+        if key in header:
+            index[col] = header.index(key)
+    missing = [h for h in DUMP_REQUIRED_HEADERS if norm_header(h) not in header]
+    if missing:
+        raise ApiError(400, "This doesn't look like the returns export — missing column(s): " + ", ".join(missing))
+
+    stats = {"total_rows": 0, "blank_rows": 0, "invalid_rows": 0, "duplicate_rows": 0}
+    records = {}
+    for raw in rows[1:]:
+        stats["total_rows"] += 1
+        if not any((c or "").strip() for c in raw):
+            stats["blank_rows"] += 1
+            continue
+        rec = {}
+        for col, _label, kind in DUMP_COLUMNS:
+            i = index.get(col)
+            v = (raw[i] if i is not None and i < len(raw) else "").strip()
+            rec[col] = parse_time(v) if kind == "time" else parse_number(v) if kind == "number" else (v or None)
+        if not rec["return_tracking_id"]:
+            stats["invalid_rows"] += 1
+            continue
+        rec["sku"] = rec["sku"] or ""
+        key = (rec["return_tracking_id"], rec["sku"])
+        prev = records.get(key)
+        if prev is not None:
+            stats["duplicate_rows"] += 1
+            # Same item twice in one file: keep the most recently updated
+            # copy (a later row wins a tie).
+            prev_t, new_t = prev["source_updated_at"], rec["source_updated_at"]
+            if prev_t is not None and (new_t is None or new_t < prev_t):
+                continue
+        records[key] = rec
+    return records, stats
 
 
 def vendor_to_dict(row):
@@ -552,24 +766,6 @@ def courier_booking_to_dict(row):
     }
     out.update(COURIER_BOOKING_CONSTANTS)
     return out
-
-
-def master_to_dict(row):
-    return {
-        "trackingId": row["tracking_id"],
-        "marketplaceOrderId": row["marketplace_order_id"],
-        "returnId": row["return_id"],
-        # Exposed as "brand" (not "sellerName") so the existing brand->vendor
-        # matching logic on the frontend needs no changes.
-        "brand": row["seller_name"],
-        "rtvShipmentId": row["rtv_shipment_id"],
-        "tmsProviderName": row["tms_provider_name"],
-        "rtvShipmentStatus": row["rtv_shipment_status"],
-        "rtvCreatedAt": row["rtv_created_at"],
-        "rtvTrackingId": row["rtv_tracking_id"],
-        "value": row["value"],
-        "orderSetId": row["order_set_id"],
-    }
 
 
 class ApiError(Exception):
@@ -798,6 +994,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.get_me()
             if path == "/api/users":
                 return self.list_users()
+            if path == "/api/dump/imports":
+                return self.list_dump_imports()
             if path == "/api/hubs":
                 return self.list_hubs()
             if path == "/api/vendors":
@@ -846,6 +1044,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         try:
+            if path == "/api/dump/upload":
+                return self.upload_dump()  # own auth: admin session or Zapier key
             if path == "/api/login":
                 return self.login()
             if path == "/api/logout":
@@ -859,8 +1059,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.create_hub()
             if path == "/api/vendors":
                 return self.create_vendor()
-            if path == "/api/dump/import":
-                return self.import_dump()
+            if path == "/api/dump/api-key":
+                return self.rotate_dump_api_key()
             if path == "/api/shipments":
                 return self.create_shipment()
             if path == "/api/email-template":
@@ -898,6 +1098,9 @@ class Handler(BaseHTTPRequestHandler):
             m = re.match(r"^/api/users/(\d+)$", path)
             if m:
                 return self.update_user(int(m.group(1)))
+            m = re.match(r"^/api/hubs/(\d+)$", path)
+            if m:
+                return self.update_hub(int(m.group(1)))
             m = re.match(r"^/api/courier-bookings/(\d+)$", path)
             if m:
                 return self.update_courier_booking(int(m.group(1)))
@@ -1177,85 +1380,234 @@ class Handler(BaseHTTPRequestHandler):
         if not tracking_id:
             raise ApiError(400, "tracking is required")
         conn = get_db()
+        rows = conn.execute(
+            "SELECT r.*, h.name AS hub_display FROM returns r LEFT JOIN hubs h ON h.id = r.hub_id "
+            "WHERE r.return_tracking_id = %s ORDER BY r.sku",
+            (tracking_id,),
+        ).fetchall()
+        if rows:
+            conn.close()
+            return self.send_json(200, {
+                "kind": "return",
+                "trackingId": tracking_id,
+                "items": [
+                    {
+                        "sku": r["sku"], "value": float(r["sale_price"] or 0), "brand": r["seller_name"],
+                        "returnType": r["return_type"], "returnStatus": r["return_status"],
+                        "hubId": r["hub_id"], "hubName": r["hub_display"] or r["hub_name"],
+                    }
+                    for r in rows
+                ],
+            })
+        fwd = conn.execute(
+            "SELECT DISTINCT return_tracking_id FROM returns WHERE forward_tracking_id = %s ORDER BY 1", (tracking_id,)
+        ).fetchall()
+        if fwd:
+            conn.close()
+            ids = [r["return_tracking_id"] for r in fwd]
+            return self.send_json(409, {
+                "kind": "forward",
+                "error": "That's a Forward Tracking ID. Scan the Return Tracking ID on the item instead.",
+                "returnIds": ids,
+            })
+        # Items from before the full daily dump existed still resolve from the
+        # old tracking dump.
         row = conn.execute("SELECT * FROM master_items WHERE tracking_id = %s", (tracking_id,)).fetchone()
         conn.close()
         if not row:
             raise ApiError(404, "Tracking ID not found in database")
-        self.send_json(200, master_to_dict(row))
+        self.send_json(200, {"kind": "legacy", "trackingId": tracking_id,
+                             "items": [{"sku": None, "value": row["value"], "brand": row["seller_name"]}]})
 
-    def import_dump(self):
-        self.require_admin()
-        body = self.read_json_body()
-        rows = body.get("rows")
-        if not isinstance(rows, list) or not rows:
-            raise ApiError(400, "rows must be a non-empty list")
-
-        # Dedupe within this dump first — last occurrence for a given tracking
-        # ID wins, matching "if there's a duplicate, the new data is used".
-        by_tracking = {}
-        for r in rows:
-            if not isinstance(r, dict):
-                continue
-            tracking = (r.get("trackingId") or "").strip()
-            if not tracking:
-                continue
-            try:
-                value = float(r.get("value") or 0)
-            except (TypeError, ValueError):
-                value = 0
-            by_tracking[tracking] = {
-                "trackingId": tracking,
-                "marketplaceOrderId": (r.get("marketplaceOrderId") or "").strip(),
-                "returnId": (r.get("returnId") or "").strip(),
-                "sellerName": (r.get("sellerName") or "").strip(),
-                "rtvShipmentId": (r.get("rtvShipmentId") or "").strip(),
-                "tmsProviderName": (r.get("tmsProviderName") or "").strip(),
-                "rtvShipmentStatus": (r.get("rtvShipmentStatus") or "").strip(),
-                "rtvCreatedAt": (r.get("rtvCreatedAt") or "").strip(),
-                "rtvTrackingId": (r.get("rtvTrackingId") or "").strip(),
-                "value": max(value, 0),
-                "orderSetId": (r.get("orderSetId") or "").strip(),
-            }
-
-        if not by_tracking:
-            raise ApiError(400, "No valid rows with a Tracking ID found")
-
-        now = datetime.now(timezone.utc).isoformat()
+    def dump_api_key_ok(self):
+        supplied = (self.headers.get("X-Api-Key") or "").strip()
+        auth = self.headers.get("Authorization") or ""
+        if not supplied and auth.lower().startswith("bearer "):
+            supplied = auth[7:].strip()
+        if not supplied:
+            return False
         conn = get_db()
-        existing_ids = set(
-            r["tracking_id"] for r in conn.execute("SELECT tracking_id FROM master_items").fetchall()
-        )
-        inserted = sum(1 for t in by_tracking if t not in existing_ids)
-        updated = len(by_tracking) - inserted
+        row = conn.execute("SELECT value FROM settings WHERE key = 'dump_api_key_hash'").fetchone()
+        conn.close()
+        return bool(row) and hmac.compare_digest(row["value"], hash_token(supplied))
 
-        values = [
-            (
-                item["trackingId"], item["marketplaceOrderId"], item["returnId"], item["sellerName"],
-                item["rtvShipmentId"], item["tmsProviderName"], item["rtvShipmentStatus"],
-                item["rtvCreatedAt"], item["rtvTrackingId"], item["value"], item["orderSetId"], now,
+    def read_upload(self):
+        """The uploaded file's bytes and name, whether it came as a raw body
+        (the app's own upload button) or multipart form data (Zapier)."""
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length <= 0:
+            raise ApiError(400, "No file received")
+        if length > MAX_UPLOAD_BYTES:
+            raise ApiError(413, "File is too large (max 60 MB)")
+        body = self.rfile.read(length)
+        ctype = self.headers.get("Content-Type") or ""
+        filename = self.headers.get("X-Filename") or ""
+        if ctype.lower().startswith("multipart/form-data"):
+            msg = email.parser.BytesParser(policy=email.policy.HTTP).parsebytes(
+                b"Content-Type: " + ctype.encode("latin-1") + b"\r\n\r\n" + body
             )
-            for item in by_tracking.values()
-        ]
-        conn.execute_values(
+            parts = [p for p in msg.iter_parts()] if msg.is_multipart() else []
+            files = [p for p in parts if p.get_filename()] or parts
+            if not files:
+                raise ApiError(400, "No file found in the upload")
+            part = files[0]
+            return part.get_payload(decode=True) or b"", part.get_filename() or filename
+        return body, filename
+
+    def upload_dump(self):
+        # Read the body before any auth answer, so a refused client gets the
+        # error message instead of a connection reset mid-upload.
+        data, filename = self.read_upload()
+        user = self.current_user()
+        if user and user["role"] == "admin":
+            source, uploaded_by = "manual", user["username"]
+        elif self.dump_api_key_ok():
+            source, uploaded_by = "zapier", "Zapier"
+        elif user:
+            raise ApiError(403, "Only admins can do that")
+        else:
+            raise ApiError(401, "Sign in, or send the upload key in an X-Api-Key header")
+
+        records, stats = prepare_dump(file_rows(data, filename))
+        if not records:
+            raise ApiError(400, "No rows with a Return Tracking ID found in that file")
+
+        conn = get_db()
+        hubs = conn.execute("SELECT id, name, dump_name FROM hubs").fetchall()
+        hub_map, unmatched = {}, []
+        for name in sorted({r["hub_name"] for r in records.values() if r["hub_name"]}):
+            hub = next((h for h in hubs if (h["dump_name"] or "").lower() == name.lower()), None)
+            if hub is None:
+                want = hub_tokens(name)
+                cands = [h for h in hubs if not h["dump_name"] and want and want <= hub_tokens(h["name"])]
+                if len(cands) == 1:
+                    hub = cands[0]
+                    conn.execute("UPDATE hubs SET dump_name = %s WHERE id = %s", (name, hub["id"]))
+                    hub["dump_name"] = name
+            if hub is None:
+                unmatched.append(name)
+            else:
+                hub_map[name] = hub["id"]
+
+        import_id = conn.execute(
+            "INSERT INTO dump_imports (source, filename, uploaded_by, created_at) VALUES (%s, %s, %s, %s) RETURNING id",
+            (source, filename or None, uploaded_by, datetime.now(timezone.utc).isoformat()),
+        ).fetchone()["id"]
+
+        cols = [c for c, _l, _k in DUMP_COLUMNS] + ["hub_id"]
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        for r in records.values():
+            row = []
+            for c in cols:
+                v = hub_map.get(r["hub_name"]) if c == "hub_id" else r[c]
+                row.append("" if v is None else v.isoformat() if isinstance(v, datetime) else v)
+            writer.writerow(row)
+        buf.seek(0)
+
+        conn.execute("CREATE TEMP TABLE incoming (LIKE returns INCLUDING DEFAULTS) ON COMMIT DROP")
+        cur = conn._conn.cursor()
+        cur.copy_expert(
+            f"COPY incoming ({', '.join(cols)}) FROM STDIN WITH (FORMAT csv, FORCE_NOT_NULL (return_tracking_id, sku))",
+            buf,
+        )
+        counts = conn.execute(
             """
-            INSERT INTO master_items (
-                tracking_id, marketplace_order_id, return_id, seller_name, rtv_shipment_id,
-                tms_provider_name, rtv_shipment_status, rtv_created_at, rtv_tracking_id, value,
-                order_set_id, updated_at
-            )
-            VALUES %s
-            ON CONFLICT (tracking_id) DO UPDATE SET
-                marketplace_order_id=excluded.marketplace_order_id, return_id=excluded.return_id,
-                seller_name=excluded.seller_name, rtv_shipment_id=excluded.rtv_shipment_id,
-                tms_provider_name=excluded.tms_provider_name, rtv_shipment_status=excluded.rtv_shipment_status,
-                rtv_created_at=excluded.rtv_created_at, rtv_tracking_id=excluded.rtv_tracking_id,
-                value=excluded.value, order_set_id=excluded.order_set_id, updated_at=excluded.updated_at
+            SELECT
+              COUNT(*) FILTER (WHERE r.return_tracking_id IS NULL) AS inserted,
+              COUNT(*) FILTER (WHERE r.return_tracking_id IS NOT NULL AND
+                  (r.source_updated_at IS NULL OR i.source_updated_at > r.source_updated_at)) AS updated,
+              COUNT(*) FILTER (WHERE r.return_tracking_id IS NOT NULL AND
+                  i.source_updated_at IS NOT DISTINCT FROM r.source_updated_at) AS unchanged,
+              COUNT(*) FILTER (WHERE r.return_tracking_id IS NOT NULL AND
+                  r.source_updated_at IS NOT NULL AND (i.source_updated_at IS NULL OR i.source_updated_at < r.source_updated_at)) AS stale
+            FROM incoming i
+            LEFT JOIN returns r ON r.return_tracking_id = i.return_tracking_id AND r.sku = i.sku
+            """
+        ).fetchone()
+        set_cols = [c for c in cols if c not in ("return_tracking_id", "sku")]
+        conn.execute(
+            f"""
+            INSERT INTO returns ({', '.join(cols)}, first_import_id, last_import_id)
+            SELECT {', '.join(cols)}, %s, %s FROM incoming
+            ON CONFLICT (return_tracking_id, sku) DO UPDATE SET
+              {', '.join(f"{c} = excluded.{c}" for c in set_cols)}, last_import_id = excluded.last_import_id
+            WHERE returns.source_updated_at IS NULL OR excluded.source_updated_at > returns.source_updated_at
             """,
-            values,
+            (import_id, import_id),
+        )
+        result = dict(stats, **{k: counts[k] for k in ("inserted", "updated", "unchanged", "stale")})
+        conn.execute(
+            """
+            UPDATE dump_imports SET total_rows = %s, blank_rows = %s, invalid_rows = %s, duplicate_rows = %s,
+                   inserted = %s, updated = %s, unchanged = %s, stale = %s, unmatched_hubs = %s
+            WHERE id = %s
+            """,
+            (result["total_rows"], result["blank_rows"], result["invalid_rows"], result["duplicate_rows"],
+             result["inserted"], result["updated"], result["unchanged"], result["stale"],
+             ", ".join(unmatched) or None, import_id),
         )
         conn.commit()
         conn.close()
-        self.send_json(200, {"total": len(by_tracking), "inserted": inserted, "updated": updated})
+        self.send_json(200, dict(result, id=import_id, source=source, filename=filename, unmatchedHubs=unmatched))
+
+    def list_dump_imports(self):
+        self.require_admin()
+        conn = get_db()
+        rows = conn.execute("SELECT * FROM dump_imports ORDER BY id DESC LIMIT 50").fetchall()
+        key = conn.execute("SELECT 1 FROM settings WHERE key = 'dump_api_key_hash'").fetchone()
+        total = conn.execute("SELECT COUNT(*) AS n FROM returns").fetchone()["n"]
+        no_hub = conn.execute(
+            "SELECT hub_name, COUNT(*) AS n FROM returns WHERE hub_id IS NULL GROUP BY hub_name ORDER BY 2 DESC"
+        ).fetchall()
+        conn.close()
+        self.send_json(200, {
+            "hasApiKey": bool(key),
+            "totalReturns": total,
+            "returnsWithoutHub": [{"hubName": r["hub_name"], "count": r["n"]} for r in no_hub],
+            "imports": [
+                {
+                    "id": r["id"], "source": r["source"], "filename": r["filename"], "uploadedBy": r["uploaded_by"],
+                    "createdAt": r["created_at"], "totalRows": r["total_rows"], "blankRows": r["blank_rows"],
+                    "invalidRows": r["invalid_rows"], "duplicateRows": r["duplicate_rows"], "inserted": r["inserted"],
+                    "updated": r["updated"], "unchanged": r["unchanged"], "stale": r["stale"],
+                    "unmatchedHubs": r["unmatched_hubs"],
+                }
+                for r in rows
+            ],
+        })
+
+    def rotate_dump_api_key(self):
+        self.require_admin()
+        key = "rtvk_" + secrets.token_urlsafe(24)
+        conn = get_db()
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('dump_api_key_hash', %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            (hash_token(key),),
+        )
+        conn.commit()
+        conn.close()
+        # Shown once — only the hash is stored.
+        self.send_json(200, {"apiKey": key})
+
+    def update_hub(self, hub_id):
+        self.require_admin()
+        body = self.read_json_body()
+        if "dumpName" not in body:
+            raise ApiError(400, "Nothing to update — send 'dumpName'")
+        dump_name = (body.get("dumpName") or "").strip() or None
+        conn = get_db()
+        row = conn.execute("UPDATE hubs SET dump_name = %s WHERE id = %s RETURNING *", (dump_name, hub_id)).fetchone()
+        if not row:
+            conn.close()
+            raise ApiError(404, "Hub not found")
+        if dump_name:
+            # Back-fill returns already imported under that name.
+            conn.execute("UPDATE returns SET hub_id = %s WHERE lower(hub_name) = lower(%s)", (hub_id, dump_name))
+        conn.commit()
+        conn.close()
+        self.send_json(200, hub_to_dict(row))
 
     # ---------- shipments ----------
     def list_shipments(self):
@@ -1407,7 +1759,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(400, f"item {i + 1}: tracking is required")
             if qty < 1 or box_no < 1:
                 raise ApiError(400, f"item {i + 1}: qty and boxNo must be >= 1")
-            clean_rows.append((tracking, max(value, 0), qty, box_no))
+            sku = (m.get("sku") or "").strip() or None
+            clean_rows.append((tracking, max(value, 0), qty, box_no, sku))
 
         conn = get_db()
         hub = conn.execute("SELECT * FROM hubs WHERE id = %s", (hub_id,)).fetchone()
@@ -1430,7 +1783,7 @@ class Handler(BaseHTTPRequestHandler):
         ).fetchone()
         shipment_id = shipment_row["id"]
         conn.executemany(
-            "INSERT INTO shipment_items (shipment_id, tracking_id, value, qty, box_no) VALUES (%s, %s, %s, %s, %s)",
+            "INSERT INTO shipment_items (shipment_id, tracking_id, value, qty, box_no, sku) VALUES (%s, %s, %s, %s, %s, %s)",
             [(shipment_id, *row) for row in clean_rows],
         )
         conn.commit()

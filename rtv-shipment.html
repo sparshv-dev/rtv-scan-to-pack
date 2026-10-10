@@ -287,6 +287,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <button type="button" id="tabShipmentArchive" aria-selected="false">Shipment archive</button>
     <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings</button>
     <div class="side-nav-label admin-only">Admin</div>
+    <button type="button" id="tabDailyData" class="admin-only" aria-selected="false">Daily data</button>
     <button type="button" id="tabHubAccounts" class="admin-only" aria-selected="false">Hub accounts</button>
   </div>
   <div class="sidebar-foot">
@@ -320,13 +321,6 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <div class="field"><label for="shipDateInput">Ship date</label><input id="shipDateInput" type="date"></div>
     </div>
     <p class="field-error" id="shippingFromHint"></p>
-  </div>
-
-  <div class="card admin-only">
-    <h2>Import daily dump</h2>
-    <p class="hint">Upload today's tracking dump (CSV, header row required): <b>Tracking ID, Marketplace Order ID, Return ID, Seller name, RTV Shipment ID, TMS Provider name, RTV Shipment Status, RTV Created At, RTV tracking id, Value, Order set ID</b>. A Tracking ID already in the database gets all its fields updated to the new values; a new Tracking ID is added. Only Tracking ID, Value and Qty (scanned at 1 per item) show up on the printed invoice — everything else is kept for reference. <button type="button" class="link-btn" id="downloadSampleDumpCsv" style="display:inline; white-space:nowrap;">Download sample CSV</button></p>
-    <input type="file" id="dumpFileInput" accept=".csv,text/csv">
-    <p class="field-error" id="dumpError"></p>
   </div>
 
   <div class="card">
@@ -528,6 +522,55 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       </table>
     </div>
     <p class="empty-state" id="cbBookingsEmpty" style="display:none;">No courier bookings yet.</p>
+  </div>
+</div>
+
+<div class="app-shell" id="dailyDataView" style="display:none; max-width: 1040px;">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · admin</p>
+      <h1>Daily data</h1>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Upload the returns export</h2>
+    <p class="hint">The full HMS returns export (CSV or .xlsx). Only the columns the app uses are kept. Re-uploading is safe: an item already in the database is only updated when the file has a newer <b>Updated At</b>, and repeats inside one file count once.</p>
+    <input type="file" id="dumpFileInput" accept=".csv,.xlsx,text/csv">
+    <p class="field-error" id="dumpError"></p>
+    <div id="dumpResult"></div>
+  </div>
+
+  <div class="card">
+    <h2>Import history</h2>
+    <p class="hint" id="dumpTotals"></p>
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>When</th><th>From</th><th>File</th><th>Rows</th><th>New</th><th>Updated</th><th>Unchanged</th><th>Older, skipped</th><th>Repeats</th><th>Blank</th><th>Hubs not matched</th></tr></thead><tbody id="dumpHistoryBody"></tbody></table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Automatic upload (Zapier)</h2>
+    <p class="hint">Zapier sends each file from the Google Form's upload folder here. It needs the upload address and the key below. The key is shown once; generating a new one stops the old one working.</p>
+    <div class="field-grid">
+      <div class="field span-2"><label>Upload address</label><input id="dumpUploadUrl" readonly class="mono"></div>
+      <div class="field span-2"><label>Key</label>
+        <div class="row-inline">
+          <input id="dumpApiKey" readonly class="mono" placeholder="">
+          <button type="button" class="btn small secondary" id="dumpCopyKey" style="display:none;">Copy</button>
+          <button type="button" class="btn small" id="dumpNewKey">Generate key</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Hub names in the file</h2>
+    <p class="hint">Each row's <b>Hub Name</b> (e.g. "Hub Malad") is matched to a hub here. Most match on their own; fix any that don't and the rows already imported are re-linked.</p>
+    <div id="dumpUnmatched"></div>
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>Hub</th><th>Name in the file</th><th></th></tr></thead><tbody id="dumpHubNamesBody"></tbody></table>
+    </div>
   </div>
 </div>
 
@@ -1627,123 +1670,6 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     }
   });
 
-  // ================= daily dump import (tracking -> SKU/value master data) =================
-  function parseCsv(text) {
-    var rows = [];
-    var i = 0, field = "", row = [], inQuotes = false;
-    var n = text.length;
-    while (i < n) {
-      var c = text[i];
-      if (inQuotes) {
-        if (c === '"') {
-          if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
-          inQuotes = false; i++; continue;
-        }
-        field += c; i++; continue;
-      } else {
-        if (c === '"') { inQuotes = true; i++; continue; }
-        if (c === ",") { row.push(field); field = ""; i++; continue; }
-        if (c === "\r") { i++; continue; }
-        if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; i++; continue; }
-        field += c; i++; continue;
-      }
-    }
-    if (field.length || row.length) { row.push(field); rows.push(row); }
-    return rows.filter(function (r) { return r.some(function (c) { return c.trim() !== ""; }); });
-  }
-
-  var DUMP_HEADER_ALIASES = {
-    trackingId: ["trackingid"],
-    marketplaceOrderId: ["marketplaceorderid"],
-    returnId: ["returnid"],
-    sellerName: ["sellername", "seller", "brand"],
-    rtvShipmentId: ["rtvshipmentid"],
-    tmsProviderName: ["tmsprovidername", "tmsprovider"],
-    rtvShipmentStatus: ["rtvshipmentstatus"],
-    rtvCreatedAt: ["rtvcreatedat"],
-    rtvTrackingId: ["rtvtrackingid"],
-    value: ["value", "mrp"],
-    orderSetId: ["ordersetid"],
-  };
-  function normalizeHeader(s) {
-    return String(s || "").trim().toLowerCase().replace(/[^a-z0-9#]/g, "");
-  }
-
-  function handleDumpCsvText(text) {
-    var errEl = document.getElementById("dumpError");
-    errEl.textContent = "";
-    var rows;
-    try { rows = parseCsv(text); } catch (err) { errEl.textContent = "Couldn't read that CSV: " + err.message; return; }
-    if (rows.length < 2) { errEl.textContent = "CSV has no data rows"; return; }
-
-    var header = rows[0].map(normalizeHeader);
-    var colIndex = {};
-    Object.keys(DUMP_HEADER_ALIASES).forEach(function (key) {
-      var aliases = DUMP_HEADER_ALIASES[key];
-      var idx = header.findIndex(function (h) { return aliases.indexOf(h) !== -1; });
-      if (idx !== -1) colIndex[key] = idx;
-    });
-    var required = ["trackingId", "value"];
-    var missing = required.filter(function (k) { return colIndex[k] === undefined; });
-    if (missing.length) { errEl.textContent = "CSV is missing required column(s): " + missing.join(", "); return; }
-
-    function col(r, key) { return colIndex[key] !== undefined ? (r[colIndex[key]] || "").trim() : ""; }
-
-    var dumpRows = [];
-    rows.slice(1).forEach(function (r) {
-      var trackingId = col(r, "trackingId");
-      if (!trackingId) return;
-      var value = parseMoneyLoose(r[colIndex.value]);
-      dumpRows.push({
-        trackingId: trackingId,
-        marketplaceOrderId: col(r, "marketplaceOrderId"),
-        returnId: col(r, "returnId"),
-        sellerName: col(r, "sellerName"),
-        rtvShipmentId: col(r, "rtvShipmentId"),
-        tmsProviderName: col(r, "tmsProviderName"),
-        rtvShipmentStatus: col(r, "rtvShipmentStatus"),
-        rtvCreatedAt: col(r, "rtvCreatedAt"),
-        rtvTrackingId: col(r, "rtvTrackingId"),
-        value: isNaN(value) || value < 0 ? 0 : value,
-        orderSetId: col(r, "orderSetId"),
-      });
-    });
-    if (dumpRows.length === 0) { errEl.textContent = "No valid rows found — check Tracking ID and Value are filled in"; return; }
-
-    postJson("/api/dump/import", { rows: dumpRows })
-      .then(function (result) {
-        toast("Dump imported: " + result.inserted + " new, " + result.updated + " updated (" + result.total + " total).");
-        document.getElementById("dumpFileInput").value = "";
-      })
-      .catch(function (err) { errEl.textContent = "Import failed: " + err.message; });
-  }
-
-  document.getElementById("dumpFileInput").addEventListener("change", function (e) {
-    var file = e.target.files[0];
-    if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function () { handleDumpCsvText(String(reader.result)); };
-    reader.onerror = function () { document.getElementById("dumpError").textContent = "Couldn't read that file"; };
-    reader.readAsText(file);
-  });
-
-  document.getElementById("downloadSampleDumpCsv").addEventListener("click", function () {
-    var sample =
-      "Tracking ID,Marketplace Order ID,Return ID,Seller name,RTV Shipment ID,TMS Provider name,RTV Shipment Status,RTV Created At,RTV tracking id,Value,Order set ID\n" +
-      "TRK-0001,MKT-55001,RET-9001,Arrow,RTVSHP-001,Delhivery,CREATED,2026-08-18T09:00:00Z,,1299,ORDSET-01\n" +
-      "TRK-0002,MKT-55002,RET-9002,Arrow,RTVSHP-001,Delhivery,CREATED,2026-08-18T09:00:00Z,,1899,ORDSET-01\n" +
-      "TRK-1001,MKT-55010,RET-9010,Rare Rabbit,RTVSHP-002,Xpressbees,CREATED,2026-08-18T09:05:00Z,,1999,ORDSET-02\n";
-    var blob = new Blob([sample], { type: "text/csv" });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = "rtv-dump-sample.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
-  });
-
   // ================= scan to pack =================
   var currentBox = []; // items in the box currently being packed
   var boxNo = 1;
@@ -1769,7 +1695,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     currentBox.forEach(function (it, idx) {
       var tr = document.createElement("tr");
       tr.innerHTML =
-        "<td class='mono'>" + escapeHtml(it.tracking) + "</td>" +
+        "<td class='mono'>" + escapeHtml(it.tracking) + (it.sku ? "<div class='hint' style='margin:0;'>SKU " + escapeHtml(it.sku) + "</div>" : "") + "</td>" +
         "<td>" + escapeHtml(it.vendorName) + "</td>" +
         "<td class='num-col mono'>" + formatMoney(it.mrp) + "</td>" +
         "<td class='num-col mono'>" + it.qty + "</td>" +
@@ -1781,8 +1707,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       delBtn.title = "Remove";
       delBtn.textContent = "✕";
       delBtn.addEventListener("click", function () {
-        scannedTrackingIds.delete(it.tracking);
         currentBox.splice(idx, 1);
+        // A return with several SKUs stays "scanned" until its last line goes.
+        if (!currentBox.some(function (x) { return x.tracking === it.tracking; })) scannedTrackingIds.delete(it.tracking);
         renderCurrentBox();
         renderClosedBoxes();
       });
@@ -1829,13 +1756,13 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 
   function addItemToBox(item, vendor) {
     currentBox.push({
-      tracking: item.tracking, vendorId: vendor.id, vendorName: vendor.name,
+      tracking: item.tracking, sku: item.sku || null, vendorId: vendor.id, vendorName: vendor.name,
       mrp: item.value, qty: item.qty,
     });
     scannedTrackingIds.add(item.tracking);
     renderCurrentBox();
     renderClosedBoxes();
-    toast("Added " + item.tracking + " — " + formatMoney(item.value));
+    toast("Added " + item.tracking + (item.sku ? " (" + item.sku + ")" : "") + " — " + formatMoney(item.value));
   }
 
   document.getElementById("closeBoxBtn").addEventListener("click", function () {
@@ -2091,17 +2018,36 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       toast(tracking + " was already scanned into this session", true);
       return;
     }
-    getJson("/api/lookup?tracking=" + encodeURIComponent(tracking))
-      .then(function (found) {
-        // Found in the database — value is known, brand is already fixed for
-        // this box, so it goes straight in with no extra step.
-        addItemToBox({ tracking: tracking, value: found.value, qty: 1 }, currentVendor);
-        scanInputEl.focus();
+    var scanErrEl = document.getElementById("scanError");
+    fetch("/api/lookup?tracking=" + encodeURIComponent(tracking))
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) { return { res: res, data: data }; });
       })
-      .catch(function () {
+      .then(function (o) {
+        if (o.res.status === 401) { showLogin(); return; }
+        if (o.res.ok) {
+          // Found — value is known and the brand is fixed for this box, so
+          // every SKU on the return goes straight in.
+          o.data.items.forEach(function (it) {
+            addItemToBox({ tracking: tracking, sku: it.sku, value: it.value, qty: 1 }, currentVendor);
+          });
+          var hub = packingHub();
+          var other = o.data.items.find(function (it) { return it.hubId && hub && it.hubId !== hub.id; });
+          if (other) scanErrEl.textContent = "Note: the daily data has " + tracking + " at " + other.hubName + ", not " + hub.name + ".";
+          scanInputEl.focus();
+          return;
+        }
+        if (o.data.kind === "forward") {
+          // Forward ID scanned by mistake — don't add anything, point them to the return ID(s).
+          scanErrEl.textContent = o.data.error + " Return ID(s) for it: " + o.data.returnIds.join(", ");
+          toast("Forward Tracking ID scanned — scan the Return Tracking ID", true);
+          scanInputEl.focus();
+          return;
+        }
         // Not in the database — fall back to manual entry for this tracking ID.
         openPendingItemForm({ tracking: tracking, value: 0, qty: 1 });
-      });
+      })
+      .catch(function (err) { toast("Couldn't look that up: " + err.message, true); });
   });
 
   document.getElementById("finishShipmentBtn").addEventListener("click", function () {
@@ -2125,7 +2071,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     closedBoxes.forEach(function (box) {
       box.items.forEach(function (it) {
         if (!byVendor[it.vendorId]) byVendor[it.vendorId] = { vendor: { id: it.vendorId, name: it.vendorName }, items: [] };
-        byVendor[it.vendorId].items.push({ tracking: it.tracking, mrp: it.mrp, qty: it.qty, boxNo: box.boxNo });
+        byVendor[it.vendorId].items.push({ tracking: it.tracking, sku: it.sku, mrp: it.mrp, qty: it.qty, boxNo: box.boxNo });
       });
     });
 
@@ -2622,6 +2568,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     document.getElementById("printView").style.display = "none";
     document.getElementById("batchView").style.display = "none";
     document.getElementById("hubAccountsView").style.display = "none";
+    document.getElementById("dailyDataView").style.display = "none";
+    document.getElementById("tabDailyData").setAttribute("aria-selected", "false");
     document.getElementById("tabPackShipments").setAttribute("aria-selected", "false");
     document.getElementById("tabShipmentArchive").setAttribute("aria-selected", "false");
     document.getElementById("tabCourierBookings").setAttribute("aria-selected", "false");
@@ -2652,6 +2600,109 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   document.getElementById("tabCourierBookings").addEventListener("click", showCourierBookingsView);
   document.getElementById("tabPackShipments").addEventListener("click", showPackShipmentsView);
   document.getElementById("tabShipmentArchive").addEventListener("click", showShipmentArchiveView);
+
+  // ================= daily data (admin) =================
+  function showDailyDataView() {
+    currentTabShow = showDailyDataView;
+    hideAllTabViews();
+    document.getElementById("dailyDataView").style.display = "block";
+    document.getElementById("tabDailyData").setAttribute("aria-selected", "true");
+    document.getElementById("dumpUploadUrl").value = location.origin + "/api/dump/upload";
+    loadDumpInfo();
+  }
+  document.getElementById("tabDailyData").addEventListener("click", showDailyDataView);
+
+  function num(n) { return Number(n || 0).toLocaleString("en-IN"); }
+
+  function loadDumpInfo() {
+    return getJson("/api/dump/imports").then(function (info) {
+      document.getElementById("dumpTotals").textContent = num(info.totalReturns) + " return items in the database.";
+      var keyInput = document.getElementById("dumpApiKey");
+      if (!keyInput.dataset.fresh) keyInput.placeholder = info.hasApiKey ? "A key is set (hidden). Generate a new one if you've lost it." : "No key yet — generate one for Zapier";
+      document.getElementById("dumpNewKey").textContent = info.hasApiKey ? "Generate new key" : "Generate key";
+
+      var body = document.getElementById("dumpHistoryBody");
+      body.innerHTML = "";
+      info.imports.forEach(function (r) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = "<td>" + escapeHtml(formatDateTime(r.createdAt)) + "</td>" +
+          "<td>" + escapeHtml(r.source === "zapier" ? "Zapier" : r.uploadedBy) + "</td>" +
+          "<td>" + escapeHtml(r.filename || "—") + "</td>" +
+          "<td class='mono'>" + num(r.totalRows) + "</td><td class='mono'>" + num(r.inserted) + "</td>" +
+          "<td class='mono'>" + num(r.updated) + "</td><td class='mono'>" + num(r.unchanged) + "</td>" +
+          "<td class='mono'>" + num(r.stale) + "</td><td class='mono'>" + num(r.duplicateRows) + "</td>" +
+          "<td class='mono'>" + num(r.blankRows) + "</td><td>" + escapeHtml(r.unmatchedHubs || "—") + "</td>";
+        body.appendChild(tr);
+      });
+      if (!info.imports.length) body.innerHTML = "<tr><td colspan='11' class='empty-state'>No files imported yet.</td></tr>";
+
+      var un = document.getElementById("dumpUnmatched");
+      un.innerHTML = info.returnsWithoutHub.length
+        ? "<p class='field-error' style='margin:0 0 10px;'>Not linked to a hub yet: " +
+          info.returnsWithoutHub.map(function (r) { return escapeHtml(r.hubName || "(blank)") + " — " + num(r.count) + " items"; }).join("; ") + "</p>"
+        : "";
+      var hb = document.getElementById("dumpHubNamesBody");
+      hb.innerHTML = "";
+      state.hubs.forEach(function (h) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = "<td>" + escapeHtml(h.name) + "</td><td><input placeholder='Hub …' value='" + escapeHtml(h.dumpName || "") + "'></td><td></td>";
+        var save = document.createElement("button");
+        save.type = "button";
+        save.className = "link-btn";
+        save.textContent = "Save";
+        save.addEventListener("click", function () {
+          var val = tr.querySelector("input").value.trim();
+          fetchJson("/api/hubs/" + h.id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dumpName: val }) })
+            .then(function (updated) { h.dumpName = updated.dumpName; toast("Saved — " + h.name); return loadDumpInfo(); })
+            .catch(function (err) { toast(err.message, true); });
+        });
+        tr.lastElementChild.appendChild(save);
+        hb.appendChild(tr);
+      });
+    }).catch(function (err) { toast("Couldn't load import history: " + err.message, true); });
+  }
+
+  document.getElementById("dumpFileInput").addEventListener("change", function (e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var errEl = document.getElementById("dumpError");
+    var out = document.getElementById("dumpResult");
+    errEl.textContent = "";
+    out.innerHTML = "<p class='hint'>Importing " + escapeHtml(file.name) + "…</p>";
+    fetchJson("/api/dump/upload", { method: "POST", headers: { "X-Filename": file.name, "Content-Type": file.type || "application/octet-stream" }, body: file })
+      .then(function (r) {
+        out.innerHTML = "<div class='summary-bar'>" +
+          [["New", r.inserted], ["Updated", r.updated], ["Unchanged", r.unchanged], ["Older, skipped", r.stale],
+           ["Repeats in file", r.duplicate_rows], ["Blank rows", r.blank_rows], ["No Return ID", r.invalid_rows]]
+            .map(function (x) { return "<div class='stat'><div class='num mono'>" + num(x[1]) + "</div><div class='lbl'>" + x[0] + "</div></div>"; }).join("") +
+          "</div>" + (r.unmatchedHubs.length ? "<p class='field-error'>Hub names not matched to a hub: " + escapeHtml(r.unmatchedHubs.join(", ")) + ". Set them below.</p>" : "");
+        toast("Imported " + file.name);
+        e.target.value = "";
+        return loadDumpInfo();
+      })
+      .catch(function (err) { out.innerHTML = ""; errEl.textContent = "Import failed: " + err.message; e.target.value = ""; });
+  });
+
+  document.getElementById("dumpNewKey").addEventListener("click", function () {
+    if (this.textContent.indexOf("new") !== -1 && !window.confirm("Generate a new key? The current one stops working, so the Zap must be updated with the new key.")) return;
+    postJson("/api/dump/api-key", {})
+      .then(function (r) {
+        var input = document.getElementById("dumpApiKey");
+        input.value = r.apiKey;
+        input.dataset.fresh = "1";
+        document.getElementById("dumpCopyKey").style.display = "";
+        toast("New key generated — copy it into Zapier now; it won't be shown again");
+        return loadDumpInfo();
+      })
+      .catch(function (err) { toast(err.message, true); });
+  });
+  document.getElementById("dumpCopyKey").addEventListener("click", function () {
+    var input = document.getElementById("dumpApiKey");
+    input.select();
+    (navigator.clipboard ? navigator.clipboard.writeText(input.value) : Promise.reject())
+      .then(function () { toast("Key copied"); })
+      .catch(function () { document.execCommand("copy"); toast("Key copied"); });
+  });
 
   // ================= hub accounts (admin) =================
   var accounts = [];
