@@ -296,6 +296,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings</button>
     <div class="side-nav-label admin-only">Admin</div>
     <button type="button" id="tabDailyData" class="admin-only" aria-selected="false">Daily data</button>
+    <button type="button" id="tabBrands" class="admin-only" aria-selected="false">Brands</button>
     <button type="button" id="tabHubAccounts" class="admin-only" aria-selected="false">Hub accounts</button>
   </div>
   <div class="sidebar-foot">
@@ -353,6 +354,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <div class="field"><label>Contact phone</label><input id="nb-contactPhone" placeholder="+91 98200 44117"></div>
       <div class="field"><label>Contact email</label><input id="nb-contactEmail" type="email" placeholder="warehouse@vendor.com"></div>
       <div class="field"><label>Pincode</label><input id="nb-pincode" placeholder="400086 (auto-detected from address if left blank)"></div>
+      <div class="field"><label>Return location</label>
+        <select id="nb-returnLocation"><option value="">Work it out from the seller list</option><option value="Local">Local (Mumbai)</option><option value="Non-Local">Non-Local</option></select>
+      </div>
       <div class="actions">
         <button type="button" class="btn small" id="saveBrand">Save brand</button>
         <button type="button" class="btn small secondary" id="cancelBrand">Cancel</button>
@@ -572,6 +576,30 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <div id="dumpUnmatched"></div>
     <div class="table-wrap">
       <table class="data-table"><thead><tr><th>Hub</th><th>Name in the file</th><th></th></tr></thead><tbody id="dumpHubNamesBody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<div class="app-shell" id="brandsView" style="display:none; max-width: 1040px;">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · admin</p>
+      <h1>Brands</h1>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Return location</h2>
+    <p class="hint"><b>Local</b> = delivered in Mumbai — a proof-of-delivery photo is required when it's marked delivered. <b>Non-Local</b> = outside Mumbai — the photo is optional. Filled in automatically from the seller list; change any brand here.</p>
+    <div class="field-grid" style="grid-template-columns: 2fr 1fr auto; align-items:end; margin-bottom:14px;">
+      <div class="field"><label for="brandsSearch">Search</label><input id="brandsSearch" placeholder="Brand, store or company…" autocomplete="off"></div>
+      <div class="field"><label for="brandsLocFilter">Return location</label>
+        <select id="brandsLocFilter"><option value="">All</option><option value="Local">Local</option><option value="Non-Local">Non-Local</option><option value="none">Not set</option></select>
+      </div>
+      <button type="button" class="btn small secondary" id="brandsCsvBtn">Download CSV</button>
+    </div>
+    <p class="hint" id="brandsCount" style="margin:-4px 0 10px;"></p>
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>Brand / store</th><th>Company</th><th>Pincode</th><th>Return location</th></tr></thead><tbody id="brandsBody"></tbody></table>
     </div>
   </div>
 </div>
@@ -2122,11 +2150,12 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       contactPhone: document.getElementById("nb-contactPhone").value.trim(),
       contactEmail: document.getElementById("nb-contactEmail").value.trim(),
       pincode: document.getElementById("nb-pincode").value.trim(),
+      returnLocation: document.getElementById("nb-returnLocation").value,
     }).then(function (vendor) {
       state.vendors.push(vendor);
       selectBoxVendor(vendor);
       document.getElementById("newBrandForm").classList.remove("is-open");
-      ["nb-name", "nb-shortName", "nb-address", "nb-contactPhone", "nb-contactEmail", "nb-pincode"].forEach(function (id) { document.getElementById(id).value = ""; });
+      ["nb-name", "nb-shortName", "nb-address", "nb-contactPhone", "nb-contactEmail", "nb-pincode", "nb-returnLocation"].forEach(function (id) { document.getElementById(id).value = ""; });
       toast("Brand saved: " + vendor.name);
     }).catch(function (err) { toast("Couldn't save brand: " + err.message, true); });
   });
@@ -2730,6 +2759,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     document.getElementById("hubAccountsView").style.display = "none";
     document.getElementById("dailyDataView").style.display = "none";
     document.getElementById("tabDailyData").setAttribute("aria-selected", "false");
+    document.getElementById("brandsView").style.display = "none";
+    document.getElementById("tabBrands").setAttribute("aria-selected", "false");
     document.getElementById("tabPackShipments").setAttribute("aria-selected", "false");
     document.getElementById("tabShipmentArchive").setAttribute("aria-selected", "false");
     document.getElementById("tabCourierBookings").setAttribute("aria-selected", "false");
@@ -2839,6 +2870,79 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       .catch(function (err) { out.innerHTML = ""; errEl.textContent = "Import failed: " + err.message; e.target.value = ""; });
   });
 
+
+  // ================= brands (admin): return location =================
+  function showBrandsView() {
+    currentTabShow = showBrandsView;
+    hideAllTabViews();
+    document.getElementById("brandsView").style.display = "block";
+    document.getElementById("tabBrands").setAttribute("aria-selected", "true");
+    renderBrands();
+  }
+  document.getElementById("tabBrands").addEventListener("click", showBrandsView);
+
+  function filteredBrands() {
+    var q = document.getElementById("brandsSearch").value.trim().toLowerCase();
+    var loc = document.getElementById("brandsLocFilter").value;
+    return state.vendors.filter(function (v) {
+      if (loc === "none" ? v.returnLocation : loc && v.returnLocation !== loc) return false;
+      if (!q) return true;
+      return [v.name, v.shortName, v.warehouseLabel, v.pincode].some(function (x) { return x && String(x).toLowerCase().indexOf(q) !== -1; });
+    }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+  }
+
+  function renderBrands() {
+    var rows = filteredBrands();
+    var notSet = state.vendors.filter(function (v) { return !v.returnLocation; }).length;
+    document.getElementById("brandsCount").textContent = rows.length + " of " + state.vendors.length + " brands shown" +
+      (notSet ? " · " + notSet + " without a return location" : "");
+    var body = document.getElementById("brandsBody");
+    body.innerHTML = "";
+    rows.forEach(function (v) {
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td>" + escapeHtml(v.name) + (v.shortName ? " <span class='hint' style='margin:0;'>(" + escapeHtml(v.shortName) + ")</span>" : "") + "</td>" +
+        "<td>" + escapeHtml(v.warehouseLabel || "—") + "</td><td class='mono'>" + escapeHtml(v.pincode || "—") + "</td><td></td>";
+      var sel = document.createElement("select");
+      [["", "Not set"], ["Local", "Local"], ["Non-Local", "Non-Local"]].forEach(function (o) {
+        var opt = document.createElement("option");
+        opt.value = o[0];
+        opt.textContent = o[1];
+        sel.appendChild(opt);
+      });
+      sel.value = v.returnLocation || "";
+      sel.addEventListener("change", function () {
+        fetchJson("/api/vendors/" + v.id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ returnLocation: sel.value }) })
+          .then(function (updated) { v.returnLocation = updated.returnLocation; toast(v.name + ": " + (v.returnLocation || "not set")); renderBrands(); })
+          .catch(function (err) { toast(err.message, true); sel.value = v.returnLocation || ""; });
+      });
+      tr.lastElementChild.appendChild(sel);
+      body.appendChild(tr);
+    });
+    if (!rows.length) body.innerHTML = "<tr><td colspan='4' class='empty-state'>No brands match.</td></tr>";
+  }
+  document.getElementById("brandsSearch").addEventListener("input", renderBrands);
+  document.getElementById("brandsLocFilter").addEventListener("change", renderBrands);
+
+  function csvCell(v) {
+    var s = v == null ? "" : String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function downloadCsv(filename, header, rows) {
+    var text = [header].concat(rows).map(function (r) { return r.map(csvCell).join(","); }).join("\r\n") + "\r\n";
+    var blob = new Blob(["\ufeff" + text], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+  document.getElementById("brandsCsvBtn").addEventListener("click", function () {
+    downloadCsv("rtv-brands-return-location.csv", ["Brand / store", "Short name", "Company", "Pincode", "Return location"],
+      filteredBrands().map(function (v) { return [v.name, v.shortName, v.warehouseLabel, v.pincode, v.returnLocation || "Not set"]; }));
+  });
 
   // ================= hub accounts (admin) =================
   var accounts = [];

@@ -334,6 +334,8 @@ def init_db():
         );
         ALTER TABLE vendors ADD COLUMN IF NOT EXISTS contact_email TEXT;
         ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pincode TEXT;
+        -- 'Local' (Mumbai, POD photo required on delivery) or 'Non-Local'.
+        ALTER TABLE vendors ADD COLUMN IF NOT EXISTS return_location TEXT;
         CREATE TABLE IF NOT EXISTS master_items (
             tracking_id TEXT PRIMARY KEY,
             marketplace_order_id TEXT,
@@ -490,6 +492,14 @@ def init_db():
                 """,
                 (name, SEED_SHORT_NAMES.get(name, ""), "", address, w["contact_name"], w["contact_phone"], w.get("contact_email", "")),
             )
+    conn.commit()
+
+    # Fill Return location from the seller sheet for any brand that doesn't
+    # have one yet — never overwrites a value someone has set by hand.
+    for r in conn.execute("SELECT id, name, warehouse_label FROM vendors WHERE return_location IS NULL").fetchall():
+        loc = guess_return_location(r["name"], r["warehouse_label"])
+        if loc:
+            conn.execute("UPDATE vendors SET return_location = %s WHERE id = %s", (loc, r["id"]))
     conn.commit()
 
     # Pincode is its own column now (needed for DTDC's Origin/Destination
@@ -687,6 +697,85 @@ def prepare_dump(rows):
     return records, stats
 
 
+# Seller -> brands -> movement, from the ops sheet ("Seller / Brand /
+# Movement"). Brand records are mostly one per store ("ARROW-InfiMala",
+# "JackJone-PhoeMark"), so each is matched by its company (warehouse label)
+# or by the brand at the start of its name. Extra spellings seen in the
+# saved records are listed alongside the sheet's brands.
+RETURN_LOCATION_RULES = [
+    ("Aditya Birla Lifestyle Brands Limited", ["Allen Solly", "Van Huesen", "Van Heusen", "Louis Phillipe", "Louis Philippe", "Peter England", "LP", "PE"], "Non-Local"),
+    ("Ochre and Black", ["AND", "GD", "Globaldesi", "Global Desi"], "Local"),
+    ("ARVIND FASHIONS LIMITED", ["Arrow"], "Non-Local"),
+    ("ARVIND LIFESTYLE BRANDS LIMITED", ["USPA"], "Non-Local"),
+    ("ARVIND YOUTH BRANDS PRIVATE LIMITED", ["Flying Machine"], "Non-Local"),
+    ("Bear House Clothing Private Limited", ["The Bear House"], "Local"),
+    ("Biba Fashion Limited", ["Biba"], "Non-Local"),
+    ("Inc. 5 Shoes Private Limited", ["Inc5"], "Local"),
+    ("Best United Ltd", ["Jack & Jones", "JackJone", "Jack and Jones Junior"], "Local"),
+    ("SELECTED RETAIL PRIVATE LIMITED", ["Selected", "Selected Home", "SeleHomm"], "Local"),
+    ("ONLY RETAIL PRIVATE LIMITED", ["Only"], "Local"),
+    ("VERO MODA RETAIL PRIVATE LIMITED", ["Vero Moda"], "Local"),
+    ("Just in Time", ["Just in Time"], "Local"),
+    ("Metro Brands Limited", ["Metro", "Mochi", "Fila", "New Era"], "Local"),
+    ("Neemans Private Limited", ["Neeman's"], "Local"),
+    ("Nishorama", ["Nishorama"], "Local"),
+    ("Pepe Jeans India Limited", ["Pepe"], "Local"),
+    ("VAMAS FASHION PRIVATE LIMITED", ["Vamas"], "Local"),
+    ("SOCH APPARELS PVT LTD", ["SOCH"], "Non-Local"),
+    ("Iconic Group", ["GANT", "True Religion"], "Non-Local"),
+    ("RADHAMANI TEXTILE PVT LTD", ["Rare Rabbit", "Rareism"], "Non-Local"),
+    ("Chumbak Design Private Limited", ["Chumbak", "Teal by Chumbak"], "Local"),
+    ("Sooperbuy Private Limited", ["Puma"], "Local"),
+    ("REGAL BRANDS PRIVATE LIMITED", ["Regal", "Rocia", "Imperio", "Ragal"], "Local"),
+    ("BATA", ["Bata Group of Brands", "Bata"], "Non-Local"),
+]
+RETURN_LOCATIONS = ("Local", "Non-Local")
+_COMPANY_NOISE = {"private", "pvt", "limited", "ltd", "the", "india", "group", "of", "brands", "and", "co"}
+
+
+def _company_key(s):
+    return "".join(w for w in re.findall(r"[a-z0-9]+", (s or "").lower()) if w not in _COMPANY_NOISE)
+
+
+def _brand_key(s):
+    # "and"/"the" are filler between words ("Jack and Jones"), but a leading
+    # AND is the brand itself.
+    words = re.findall(r"[a-z0-9]+", (s or "").lower().replace("&", " and "))
+    return "".join(w for i, w in enumerate(words) if w != "the" and (i == 0 or w != "and"))
+
+
+def _common_prefix(a, b):
+    n = 0
+    while n < min(len(a), len(b)) and a[n] == b[n]:
+        n += 1
+    return n
+
+
+def guess_return_location(name, warehouse_label):
+    """'Local' / 'Non-Local' when exactly one movement fits, else None."""
+    label, name_key = _company_key(warehouse_label), _company_key(name)
+    prefix = _brand_key(re.split(r"[-(]", name or "")[0])
+    words = re.findall(r"[a-z0-9]+", (name or "").lower())
+    first = words[0] if words else ""
+    full = _brand_key(name)
+    found = set()
+    for seller, brands, movement in RETURN_LOCATION_RULES:
+        sk = _company_key(seller)
+        if sk and (sk in label or (len(label) > 5 and label in sk) or sk in name_key):
+            found.add(movement)
+            continue
+        for b in (_brand_key(x) for x in brands):
+            if not b or not prefix:
+                continue
+            if ((len(b) <= 3 and (prefix == b or first == b))
+                    or (len(prefix) >= 3 and len(b) > 3 and (b.startswith(prefix) or prefix.startswith(b)))
+                    or (len(b) > 5 and _common_prefix(prefix, b) >= 6)
+                    or (len(b) >= 6 and b in full)):
+                found.add(movement)
+                break
+    return found.pop() if len(found) == 1 else None
+
+
 def vendor_to_dict(row):
     return {
         "id": row["id"],
@@ -698,6 +787,7 @@ def vendor_to_dict(row):
         "contactPhone": row["contact_phone"],
         "contactEmail": row["contact_email"],
         "pincode": row["pincode"],
+        "returnLocation": row.get("return_location"),
     }
 
 
@@ -1097,6 +1187,9 @@ class Handler(BaseHTTPRequestHandler):
             m = re.match(r"^/api/hubs/(\d+)$", path)
             if m:
                 return self.update_hub(int(m.group(1)))
+            m = re.match(r"^/api/vendors/(\d+)$", path)
+            if m:
+                return self.update_vendor(int(m.group(1)))
             m = re.match(r"^/api/courier-bookings/(\d+)$", path)
             if m:
                 return self.update_courier_booking(int(m.group(1)))
@@ -1322,19 +1415,38 @@ class Handler(BaseHTTPRequestHandler):
         contact_phone = (body.get("contactPhone") or "").strip()
         contact_email = (body.get("contactEmail") or "").strip()
         pincode = (body.get("pincode") or "").strip() or parse_pincode(address)
+        return_location = (body.get("returnLocation") or "").strip() or guess_return_location(name, warehouse_label)
+        if return_location and return_location not in RETURN_LOCATIONS:
+            raise ApiError(400, "returnLocation must be 'Local' or 'Non-Local'")
         conn = get_db()
         existing = conn.execute("SELECT * FROM vendors WHERE name = %s", (name,)).fetchone()
         if existing:
             conn.close()
             raise ApiError(409, f"A warehouse for '{name}' already exists")
         row = conn.execute(
-            "INSERT INTO vendors (name, short_name, warehouse_label, address, contact_name, contact_phone, contact_email, pincode) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
-            (name, short_name, warehouse_label, address, contact_name, contact_phone, contact_email, pincode),
+            "INSERT INTO vendors (name, short_name, warehouse_label, address, contact_name, contact_phone, contact_email, pincode, return_location) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
+            (name, short_name, warehouse_label, address, contact_name, contact_phone, contact_email, pincode, return_location),
         ).fetchone()
         conn.commit()
         conn.close()
         self.send_json(201, vendor_to_dict(row))
+
+    def update_vendor(self, vendor_id):
+        self.require_admin()
+        body = self.read_json_body()
+        if "returnLocation" not in body:
+            raise ApiError(400, "Nothing to update — send 'returnLocation'")
+        loc = (body.get("returnLocation") or "").strip() or None
+        if loc and loc not in RETURN_LOCATIONS:
+            raise ApiError(400, "returnLocation must be 'Local' or 'Non-Local'")
+        conn = get_db()
+        row = conn.execute("UPDATE vendors SET return_location = %s WHERE id = %s RETURNING *", (loc, vendor_id)).fetchone()
+        conn.commit()
+        conn.close()
+        if not row:
+            raise ApiError(404, "Brand not found")
+        self.send_json(200, vendor_to_dict(row))
 
     # ---------- email template (shared, applies to every future draft) ----------
     def get_email_template(self):
