@@ -333,15 +333,16 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 
   <div class="card">
     <h2>Scan to pack</h2>
-    <p class="hint">Pick the brand this box is going to, then scan or type each tracking ID and press Enter — its value is looked up automatically and the item is added straight to the box. Close the box once it's packed, then finish the shipment(s) to print labels &amp; invoices.</p>
+    <p class="hint">Pick the brand, then scan each Return Tracking ID and press Enter — its value is looked up automatically and the item goes straight into the box. Close each box once it's packed. One brand per shipment: finish it (and print) before packing the next brand.</p>
 
     <div class="field-grid">
       <div class="field">
-        <label id="boxVendorPickerLabel">Brand for this box</label>
+        <label id="boxVendorPickerLabel">Brand for this shipment</label>
         <div class="row-inline">
           <div class="brand-picker" id="boxVendorPicker"></div>
           <button type="button" class="link-btn" id="toggleNewBrand" style="white-space:nowrap;">+ Add new brand</button>
         </div>
+        <p class="hint" id="brandLockNote" style="margin:4px 0 0;"></p>
       </div>
     </div>
 
@@ -1832,10 +1833,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     var body = document.getElementById("boxBody");
     body.innerHTML = "";
     document.getElementById("boxEmpty").style.display = currentBox.length ? "none" : "block";
-    // Brand is locked in once the box has items — switching mid-box would silently
-    // mislabel already-scanned rows, so require closing the box first.
-    document.getElementById("boxVendorPicker").classList.toggle("is-disabled", currentBox.length > 0);
-    document.getElementById("toggleNewBrand").disabled = currentBox.length > 0;
+    updateBrandLock();
     currentBox.forEach(function (it, idx) {
       var tr = document.createElement("tr");
       tr.innerHTML =
@@ -1860,6 +1858,18 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       tr.lastElementChild.appendChild(delBtn);
       body.appendChild(tr);
     });
+  }
+
+  // One brand per packing session: once anything is scanned the brand is
+  // fixed for every box until the shipment is finished (or every box is
+  // removed), so a session can never mix brands.
+  function updateBrandLock() {
+    var locked = currentBox.length > 0 || closedBoxes.length > 0;
+    document.getElementById("boxVendorPicker").classList.toggle("is-disabled", locked);
+    document.getElementById("toggleNewBrand").disabled = locked;
+    document.getElementById("brandLockNote").textContent = locked && currentVendor
+      ? "Packing " + currentVendor.name + " only. Finish this shipment to pack another brand."
+      : "";
   }
 
   function renderClosedBoxes() {
@@ -1896,6 +1906,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     document.getElementById("sessionQtyStat").textContent = String(totalQty);
     document.getElementById("sessionAmountStat").textContent = formatMoney(totalAmount);
     document.getElementById("finishShipmentBtn").disabled = closedBoxes.length === 0 && currentBox.length === 0;
+    updateBrandLock();
   }
 
   function addItemToBox(item, vendor) {
