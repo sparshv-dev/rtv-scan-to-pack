@@ -535,7 +535,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 
   <div class="card">
     <h2>Upload the returns export</h2>
-    <p class="hint">The full HMS returns export (CSV or .xlsx). Only the columns the app uses are kept. Re-uploading is safe: an item already in the database is only updated when the file has a newer <b>Updated At</b>, and repeats inside one file count once.</p>
+    <p class="hint">The HMS returns export (CSV or .xlsx). Only the 19 needed columns are kept; every other column in the file is ignored. Re-uploading is safe: an item already in the database is only updated when the file has a newer <b>Updated At</b>, and repeats inside one file count once.</p>
     <input type="file" id="dumpFileInput" accept=".csv,.xlsx,text/csv">
     <p class="field-error" id="dumpError"></p>
     <div id="dumpResult"></div>
