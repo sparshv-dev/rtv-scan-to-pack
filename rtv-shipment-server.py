@@ -1659,6 +1659,7 @@ class Handler(BaseHTTPRequestHandler):
         manifest = [
             {
                 "tracking": r["tracking_id"],
+                "sku": r["sku"],
                 "mrp": r["value"],
                 "qty": r["qty"],
                 "boxNo": r["box_no"],

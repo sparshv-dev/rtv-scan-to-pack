@@ -194,23 +194,27 @@ body:not(.is-admin) .admin-only { display: none !important; }
 .stamp { display: inline-flex; align-items: center; justify-content: center; width: 0.6in; height: 0.6in; border-radius: 999px; border: 3px solid #B23A1E; color: #B23A1E; font-weight: 900; font-size: 14px; letter-spacing: 0.02em; transform: rotate(-6deg); flex: none; }
 .label-topbar .brand { font-size: 10px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: #1A1A1A; }
 .label-topbar .service { font-size: 17px; font-weight: 900; letter-spacing: -0.01em; margin-top: 2px; }
-.box-count { text-align: right; font-size: 10px; color: #4D4D4D; align-self: flex-end; margin-top: -0.06in; }
-.box-count b { display: block; font-size: 20px; color: #1A1A1A; line-height: 1; margin-bottom: 2px; }
-.label-invoice { display: flex; align-items: baseline; justify-content: space-between; gap: 0.1in; border: 2px solid #1A1A1A; border-radius: 3px; padding: 0.05in 0.1in; }
-.label-invoice .k { font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #6B6B6B; }
-.label-invoice .v { font-size: 14px; font-weight: 800; color: #1A1A1A; }
+.label-boxno { text-align: right; font-size: 10px; font-weight: 700; color: #4D4D4D; line-height: 1.1; }
+.label-boxno b { display: block; font-size: 24px; font-weight: 900; color: #1A1A1A; line-height: 1; }
+.label-barcode .packed { font-size: 9.5px; color: #4D4D4D; margin-top: 1px; }
+.label-barcode { border: 2px solid #1A1A1A; border-radius: 3px; padding: 0.04in 0.08in 0.03in; text-align: center; }
+.label-barcode .k { font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #6B6B6B; text-align: left; margin-bottom: 2px; }
+.label-barcode .v { font-size: 14px; font-weight: 800; color: #1A1A1A; letter-spacing: 0.03em; margin-top: 2px; }
+svg.barcode { display: block; width: 100%; }
+svg.barcode rect { fill: #000; }
 .addr-block { display: flex; flex-direction: column; gap: 0.09in; }
 .addr-row .k { font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #6B6B6B; margin-bottom: 2px; }
 .addr-row.from .v { font-size: 11px; line-height: 1.32; color: #333333; }
 .addr-row.to { border: 2px solid #1A1A1A; padding: 0.07in 0.1in; border-radius: 3px; }
 .addr-row.to .v { font-size: 14px; font-weight: 700; line-height: 1.3; }
 .addr-row.to .v .vendor-name { display: block; font-size: 15.5px; font-weight: 900; margin-bottom: 1px; }
-.manifest { flex: 1; display: flex; flex-direction: column; justify-content: center; min-height: 0; overflow: hidden; }
-.manifest .k { font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #6B6B6B; margin-bottom: 3px; }
-.qty-summary { display: flex; align-items: baseline; gap: 0.1in; }
-.qty-summary .qty-num { font-size: 0.62in; font-weight: 900; line-height: 1; color: #1A1A1A; font-variant-numeric: tabular-nums; }
-.qty-summary .qty-lbl { font-size: 11px; color: #4D4D4D; font-weight: 600; }
-.manifest-more { font-size: 8.8px; color: #6B6B6B; margin-top: 8px; font-style: italic; }
+.addr-row.to.sm .v { font-size: 12px; line-height: 1.25; }
+.addr-row.to.sm .v .vendor-name { font-size: 14px; }
+.addr-row.to.xs .v { font-size: 10.5px; line-height: 1.22; }
+.addr-row.to.xs .v .vendor-name { font-size: 13px; }
+.manifest { margin-top: auto; font-size: 13px; color: #1A1A1A; }
+.manifest .k { font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #6B6B6B; margin-right: 4px; }
+.manifest b { font-size: 16px; font-weight: 900; }
 .label-footer { border-top: 1.5px dashed #B0B0B0; padding-top: 0.07in; display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; }
 .handling { display: flex; gap: 10px; }
 .handling .h-item { text-align: center; font-size: 7.5px; color: #4D4D4D; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
@@ -229,6 +233,9 @@ body:not(.is-admin) .admin-only { display: none !important; }
 .invoice-head .meta .row { margin-bottom: 3px; }
 .invoice-head .meta .k { color: #6B6B6B; margin-right: 6px; }
 .invoice-head .meta .v { font-weight: 700; }
+.invoice-head .meta .invoice-barcode { width: 2.7in; margin: 4px 0 6px auto; }
+.invoice-box-tag { display: inline-block; font-size: 12px; font-weight: 800; border: 1.5px solid #1A1A1A; border-radius: 3px; padding: 2px 8px; margin-top: 2px; }
+table.invoice-table tfoot tr.invoice-all-boxes td { border-top: 1px solid #C2C2C2; font-weight: 600; font-size: 11px; color: #4D4D4D; padding-top: 6px; }
 .invoice-summary { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; border: 1.5px solid #1A1A1A; border-radius: 4px; padding: 14px 16px; font-size: 13px; }
 .invoice-summary > div { display: contents; }
 .invoice-summary .k { font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #6B6B6B; white-space: nowrap; padding-top: 1px; }
@@ -239,7 +246,8 @@ body:not(.is-admin) .admin-only { display: none !important; }
 .invoice-manifest { flex: 1; min-height: 0; overflow: hidden; }
 table.invoice-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 table.invoice-table th { text-align: left; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; color: #6B6B6B; border-bottom: 2px solid #1A1A1A; padding: 8px 10px; font-weight: 700; }
-table.invoice-table td { padding: 7px 10px; border-bottom: 1px solid #E5E5E5; }
+table.invoice-table td { padding: 5px 10px; border-bottom: 1px solid #E5E5E5; }
+table.invoice-table td.sku { font-size: 10.5px; color: #4D4D4D; }
 table.invoice-table tr:nth-child(even) td { background: #F5F5F5; }
 table.invoice-table td.num, table.invoice-table th.num { text-align: right; }
 table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1A; padding: 9px 10px; font-weight: 800; background: none; }
@@ -758,6 +766,57 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       .catch(function (err) { toast("Couldn't save hub: " + err.message, true); });
   });
 
+  // ================= Code 128 barcodes (code set B, no external library) =================
+  // Bar/space module widths for symbol values 0-106 (103-105 = start A/B/C,
+  // 106 = stop). Shared by the printed sheets (SVG) and the PDF download.
+  var CODE128_PATTERNS = [
+    "212222", "222122", "222221", "121223", "121322", "131222", "122213", "122312", "132212", "221213",
+    "221312", "231212", "112232", "122132", "122231", "113222", "123122", "123221", "223211", "221132",
+    "221231", "213212", "223112", "312131", "311222", "321122", "321221", "312212", "322112", "322211",
+    "212123", "212321", "232121", "111323", "131123", "131321", "112313", "132113", "132311", "211313",
+    "231113", "231311", "112133", "112331", "132131", "113123", "113321", "133121", "313121", "211331",
+    "231131", "213113", "213311", "213131", "311123", "311321", "331121", "312113", "312311", "332111",
+    "314111", "221411", "431111", "111224", "111422", "121124", "121421", "141122", "141221", "112214",
+    "112412", "122114", "122411", "142112", "142211", "241211", "221114", "413111", "241112", "134111",
+    "111242", "121142", "121241", "114212", "124112", "124211", "411212", "421112", "421211", "212141",
+    "214121", "412121", "111143", "111341", "131141", "114113", "114311", "411113", "411311", "113141",
+    "114131", "311141", "411131", "211412", "211214", "211232", "2331112"
+  ];
+  var BARCODE_QUIET_MODULES = 10;
+
+  // Alternating bar/space widths in modules, starting with a bar.
+  function code128Widths(text) {
+    var values = [104]; // start code B
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charCodeAt(i);
+      if (c < 32 || c > 126) throw new Error("Can't put '" + text[i] + "' in a barcode");
+      values.push(c - 32);
+    }
+    var check = values[0];
+    for (var j = 1; j < values.length; j++) check += values[j] * j;
+    values.push(check % 103);
+    values.push(106);
+    var widths = [];
+    values.forEach(function (v) { CODE128_PATTERNS[v].split("").forEach(function (d) { widths.push(Number(d)); }); });
+    return widths;
+  }
+
+  // Bars as [startModule, widthModules], with the quiet zone included in total.
+  function barcodeBars(text) {
+    var widths = code128Widths(text);
+    var x = BARCODE_QUIET_MODULES, bars = [];
+    widths.forEach(function (w, i) { if (i % 2 === 0) bars.push([x, w]); x += w; });
+    return { bars: bars, total: x + BARCODE_QUIET_MODULES };
+  }
+
+  function barcodeSvg(text, heightIn, extraClass) {
+    var b = barcodeBars(text);
+    return "<svg class='barcode" + (extraClass ? " " + extraClass : "") + "' viewBox='0 0 " + b.total + " 100' preserveAspectRatio='none' " +
+      "style='height:" + heightIn + "in' shape-rendering='crispEdges' role='img' aria-label='Barcode " + escapeHtml(text) + "'>" +
+      b.bars.map(function (bar) { return "<rect x='" + bar[0] + "' y='0' width='" + bar[1] + "' height='100'/>"; }).join("") +
+      "</svg>";
+  }
+
   // ================= sheet rendering =================
   function formatDate(iso) {
     if (!iso) return "";
@@ -766,27 +825,34 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
   }
 
+  // Warehouse addresses vary a lot in length; long ones step down a font
+  // size so the label never runs off the 4x6 sheet.
+  function labelAddressSize(text) {
+    var n = text.length;
+    return n > 260 ? "xs" : n > 170 ? "sm" : "";
+  }
+
   function labelSheetHtml(shipment, box, boxIndex, totalBoxes) {
     var boxQty = box.rows.reduce(function (sum, r) { return sum + (r.qty || 0); }, 0);
     var boxLines = box.rows.length;
+    var v = shipment.vendor;
+    var toText = v.name + (v.warehouseLabel ? " — " + v.warehouseLabel : "") + v.address + (v.contactPhone ? (v.contactName || "") + v.contactPhone : "");
     return (
       "<div class='sheet label-sheet'>" +
-        "<div class='label-topbar'><div><div class='brand'>Zilo Reverse Logistics</div><div class='service'>RETURN TO VENDOR</div></div><div class='stamp'>RTV</div></div>" +
-        "<div class='box-count'><b>Box " + boxIndex + " of " + totalBoxes + "</b>Packed " + formatDate(shipment.shipDate) + " · " + escapeHtml(shipment.hub.name) + "</div>" +
-        "<div class='label-invoice'><div class='k'>Invoice No.</div><div class='v mono'>" + escapeHtml(shipment.invoiceNo) + "</div></div>" +
+        "<div class='label-topbar'><div><div class='brand'>Zilo Reverse Logistics</div><div class='service'>RETURN TO VENDOR</div></div>" +
+          "<div class='label-boxno'><b>Box " + boxIndex + "</b>of " + totalBoxes + "</div></div>" +
+        "<div class='label-barcode'><div class='k'>Invoice No.</div>" + barcodeSvg(shipment.invoiceNo, 0.6) +
+          "<div class='v mono'>" + escapeHtml(shipment.invoiceNo) + "</div>" +
+          "<div class='packed'>Packed " + formatDate(shipment.shipDate) + " · " + escapeHtml(shipment.hub.name) + "</div></div>" +
         "<div class='addr-block'>" +
           "<div class='addr-row from'><div class='k'>From</div><div class='v'>" + escapeHtml(shipment.hub.name) + " — " + escapeHtml(shipment.hub.address) + (shipment.hub.phone ? " · " + escapeHtml(shipment.hub.phone) : "") + "</div></div>" +
-          "<div class='addr-row to'><div class='k'>Deliver to warehouse</div><div class='v'>" +
-            "<span class='vendor-name'>" + escapeHtml(shipment.vendor.name) + (shipment.vendor.warehouseLabel ? " — " + escapeHtml(shipment.vendor.warehouseLabel) : "") + "</span>" +
-            escapeHtml(shipment.vendor.address) +
-            (shipment.vendor.contactPhone ? "<br>Attn: " + escapeHtml(shipment.vendor.contactName || "Inbound Receiving") + " · " + escapeHtml(shipment.vendor.contactPhone) : "") +
+          "<div class='addr-row to " + labelAddressSize(toText) + "'><div class='k'>Deliver to warehouse</div><div class='v'>" +
+            "<span class='vendor-name'>" + escapeHtml(v.name) + (v.warehouseLabel ? " — " + escapeHtml(v.warehouseLabel) : "") + "</span>" +
+            escapeHtml(v.address) +
+            (v.contactPhone ? "<br>Attn: " + escapeHtml(v.contactName || "Inbound Receiving") + " · " + escapeHtml(v.contactPhone) : "") +
           "</div></div>" +
         "</div>" +
-        "<div class='manifest'>" +
-          "<div class='k'>Contents — this box</div>" +
-          "<div class='qty-summary'><div class='qty-num'>" + boxQty + "</div><div class='qty-lbl'>unit" + (boxQty === 1 ? "" : "s") + " · " + boxLines + " return line" + (boxLines === 1 ? "" : "s") + "</div></div>" +
-          "<div class='manifest-more'>Tracking detail is on the invoice packed with this shipment</div>" +
-        "</div>" +
+        "<div class='manifest'><span class='k'>This box</span> <b>" + boxQty + " unit" + (boxQty === 1 ? "" : "s") + "</b> · " + boxLines + " return line" + (boxLines === 1 ? "" : "s") + "</div>" +
         "<div class='label-footer'>" +
           "<div class='handling'><div class='h-item'><span class='h-icon'>&#9730;</span>Keep dry</div><div class='h-item'><span class='h-icon'>&#9888;</span>No stacking</div></div>" +
           "<div class='pod-note'>Recipient: sign &amp; return the invoice packed with this shipment.</div>" +
@@ -808,29 +874,50 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     return parseFloat(cleaned);
   }
 
-  function invoiceSheetHtml(shipment, copyType) {
-    var rowsHtml = shipment.manifest.map(function (r) {
-      return "<tr><td class='mono'>" + escapeHtml(r.tracking) + "</td><td class='num mono'>" + formatMoney(r.mrp) + "</td><td class='num'>" + r.qty + "</td><td class='num'>" + r.boxNo + "</td><td class='num mono'>" + formatMoney(r.mrp * r.qty) + "</td></tr>";
+  // Rows that fit one A4 invoice page; a box with more continues on the next page.
+  var INVOICE_ROWS_PER_PAGE = 14;
+  function chunkRows(rows, size) {
+    var out = [];
+    for (var i = 0; i < rows.length; i += size) out.push(rows.slice(i, i + size));
+    return out.length ? out : [[]];
+  }
+  function rowsTotal(rows) { return rows.reduce(function (sum, r) { return sum + (r.mrp || 0) * (r.qty || 0); }, 0); }
+  function rowsUnits(rows) { return rows.reduce(function (sum, r) { return sum + (r.qty || 0); }, 0); }
+
+  // One page of one copy for one box. page = { rows, index, count } splits a
+  // long box over several pages; totals for the box print on its last page.
+  function invoiceSheetHtml(shipment, copyType, box, boxIndex, totalBoxes, page) {
+    var rowsHtml = page.rows.map(function (r) {
+      return "<tr><td class='mono'>" + escapeHtml(r.tracking) + "</td><td class='mono sku'>" + escapeHtml(r.sku || "") + "</td><td class='num mono'>" + formatMoney(r.mrp) + "</td><td class='num'>" + r.qty + "</td><td class='num mono'>" + formatMoney(r.mrp * r.qty) + "</td></tr>";
     }).join("");
-    var grandTotal = shipment.manifest.reduce(function (sum, r) { return sum + (r.mrp || 0) * (r.qty || 0); }, 0);
+    var isLastPage = page.index === page.count - 1;
+    var boxTotal = rowsTotal(box.rows);
+    var grandTotal = rowsTotal(shipment.manifest);
     var isVendor = copyType === "vendor";
     var badgeText = isVendor ? "VENDOR COPY" : "TRANSPORTER COPY";
     var signLabel = isVendor ? "Received by — vendor warehouse" : "Handed over to — transporter";
     var totals = shipmentTotals(shipment);
+    var footRows = isLastPage
+      ? "<tr><td colspan='4' class='invoice-grand-total-label'>Box " + boxIndex + " total</td><td class='num mono invoice-grand-total-value'>" + formatMoney(boxTotal) + "</td></tr>" +
+        "<tr class='invoice-all-boxes'><td colspan='4' class='invoice-grand-total-label'>Invoice total — all " + totalBoxes + " box" + (totalBoxes === 1 ? "" : "es") + "</td><td class='num mono'>" + formatMoney(grandTotal) + "</td></tr>"
+      : "<tr><td colspan='5' class='invoice-grand-total-label'>Box " + boxIndex + " continues on the next page</td></tr>";
     return (
       "<div class='sheet invoice-sheet'>" +
         "<div class='copy-badge'>" + badgeText + "</div>" +
         "<div class='invoice-head'>" +
           "<div class='brand-line'><div class='stamp'>RTV</div><div><div class='brand'>Zilo Reverse Logistics</div><h2>Return Delivery Invoice</h2></div></div>" +
           "<div class='meta'>" +
+            barcodeSvg(shipment.invoiceNo, 0.42, "invoice-barcode") +
             "<div class='row'><span class='k'>Invoice No.</span><span class='v mono'>" + escapeHtml(shipment.invoiceNo) + "</span></div>" +
             "<div class='row'><span class='k'>Date</span><span class='v mono'>" + formatDate(shipment.shipDate) + "</span></div>" +
+            "<div class='invoice-box-tag'>Box " + boxIndex + " of " + totalBoxes + (page.count > 1 ? " · page " + (page.index + 1) + " of " + page.count : "") + "</div>" +
           "</div>" +
         "</div>" +
         "<div class='invoice-summary'>" +
           "<div><span class='k'>From</span><span class='v'>" + escapeHtml(shipment.hub.name) + " — " + escapeHtml(shipment.hub.address) + "</span></div>" +
           "<div><span class='k'>To</span><span class='v'>" + escapeHtml(shipment.vendor.name) + (shipment.vendor.warehouseLabel ? " — " + escapeHtml(shipment.vendor.warehouseLabel) : "") + " — " + escapeHtml(shipment.vendor.address) + "</span></div>" +
-          "<div><span class='k'>Packages</span><span class='v'>" + totals.boxes + " box" + (totals.boxes === 1 ? "" : "es") + " · " + totals.returns + " returns · " + totals.units + " units</span></div>" +
+          "<div><span class='k'>This box</span><span class='v'>Box " + boxIndex + " of " + totalBoxes + " · " + box.rows.length + " item" + (box.rows.length === 1 ? "" : "s") + " · " + rowsUnits(box.rows) + " unit" + (rowsUnits(box.rows) === 1 ? "" : "s") + " · " + formatMoney(boxTotal) + "</span></div>" +
+          "<div><span class='k'>Whole invoice</span><span class='v'>" + totals.boxes + " box" + (totals.boxes === 1 ? "" : "es") + " · " + totals.returns + " items · " + totals.units + " units · " + formatMoney(grandTotal) + "</span></div>" +
         "</div>" +
         "<div class='invoice-courier'>" +
           "<div class='k'>Courier details — to be filled in at handover</div>" +
@@ -838,8 +925,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
           "<div class='signfield'><span>AWB / Tracking No.</span><span></span></div>" +
         "</div>" +
         "<div class='invoice-manifest'>" +
-          "<table class='invoice-table'><thead><tr><th>Tracking</th><th class='num'>Value</th><th class='num'>Qty</th><th class='num'>Box</th><th class='num'>Total</th></tr></thead><tbody>" + rowsHtml + "</tbody>" +
-          "<tfoot><tr><td colspan='4' class='invoice-grand-total-label'>Grand Total</td><td class='num mono invoice-grand-total-value'>" + formatMoney(grandTotal) + "</td></tr></tfoot></table>" +
+          "<table class='invoice-table'><thead><tr><th>Tracking</th><th>SKU</th><th class='num'>Value</th><th class='num'>Qty</th><th class='num'>Total</th></tr></thead><tbody>" + rowsHtml + "</tbody>" +
+          "<tfoot>" + footRows + "</tfoot></table>" +
         "</div>" +
         "<div class='invoice-sign'>" +
           "<div class='signfield'><span>" + signLabel + " — name &amp; signature</span><span></span></div>" +
@@ -1007,56 +1094,80 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     return { newPage: newPage, text: text, textRight: textRight, textWrapped: textWrapped, line: line, dashedLine: dashedLine, rect: rect, build: build };
   }
 
+  function drawPdfBarcode(pdf, text, x, yFromTop, width, height) {
+    var b = barcodeBars(text);
+    var unit = width / b.total;
+    b.bars.forEach(function (bar) { pdf.rect(x + bar[0] * unit, yFromTop, bar[1] * unit, height, "fill", null, [0, 0, 0]); });
+  }
+
   function drawLabelPdfPage(pdf, shipment, box, boxIndex, totalBoxes) {
     var W = 288, H = 432, pad = 16, contentW = W - pad * 2;
+    var v = shipment.vendor;
     pdf.newPage(W, H);
     var y = pad;
     pdf.text(pad, y + 7, "ZILO REVERSE LOGISTICS", 7, true, PDF_MUTED);
-    pdf.textRight(W - pad, y + 8, "Box " + boxIndex + " of " + totalBoxes, 8, true, PDF_INK);
+    pdf.textRight(W - pad, y + 14, "Box " + boxIndex, 17, true, PDF_INK);
+    pdf.textRight(W - pad, y + 25, "of " + totalBoxes, 8, true, PDF_MUTED);
     y += 14;
     pdf.text(pad, y + 11, "RETURN TO VENDOR", 15, true, PDF_INK);
     y += 18;
     pdf.line(pad, y, W - pad, y, 1.5, PDF_INK);
-    y += 12;
-    pdf.text(pad, y, "Packed " + formatDate(shipment.shipDate) + " - " + shipment.hub.name, 8, false, PDF_MUTED);
-    y += 16;
+    y += 8;
+
+    var bcTop = y;
+    pdf.text(pad + 6, y + 9, "INVOICE NO.", 6.5, true, PDF_MUTED);
+    y += 13;
+    drawPdfBarcode(pdf, shipment.invoiceNo, pad + 4, y, contentW - 8, 42);
+    y += 54;
+    var invW = pdfTextWidth(pdfSafe(shipment.invoiceNo), 11, true);
+    pdf.text(pad + (contentW - invW) / 2, y, shipment.invoiceNo, 11, true, PDF_INK);
+    y += 11;
+    var packed = "Packed " + formatDate(shipment.shipDate) + " - " + shipment.hub.name;
+    pdf.text(pad + (contentW - pdfTextWidth(pdfSafe(packed), 7.5, false)) / 2, y, packed, 7.5, false, PDF_MUTED);
+    y += 6;
+    pdf.rect(pad, bcTop, contentW, y - bcTop, "stroke", PDF_INK, null, 1.2);
+    y += 14;
 
     pdf.text(pad, y, "FROM", 6.5, true, PDF_MUTED);
     y += 10;
-    var fromLines = pdf.textWrapped(pad, y, contentW, shipment.hub.name + " - " + shipment.hub.address + (shipment.hub.phone ? " - " + shipment.hub.phone : ""), 8, false, 10, [0.2, 0.2, 0.2]);
-    y += fromLines * 10 + 10;
+    var fromLines = pdf.textWrapped(pad, y, contentW, shipment.hub.name + " - " + shipment.hub.address + (shipment.hub.phone ? " - " + shipment.hub.phone : ""), 7.5, false, 9, [0.2, 0.2, 0.2]);
+    y += fromLines * 9 + 8;
 
+    var toText = v.address + (v.contactPhone ? " - Attn: " + (v.contactName || "Inbound Receiving") + " - " + v.contactPhone : "");
+    var size = labelAddressSize(v.name + (v.warehouseLabel || "") + toText);
+    var addrFont = size === "xs" ? 7.5 : size === "sm" ? 8.2 : 9;
     pdf.text(pad, y, "DELIVER TO WAREHOUSE", 6.5, true, PDF_MUTED);
     y += 12;
     var boxTop = y - 4;
-    pdf.text(pad + 8, y + 8, shipment.vendor.name + (shipment.vendor.warehouseLabel ? " - " + shipment.vendor.warehouseLabel : ""), 11, true, PDF_INK);
-    y += 20;
-    var addrLines = pdf.textWrapped(pad + 8, y, contentW - 16, shipment.vendor.address + (shipment.vendor.contactPhone ? " - Attn: " + (shipment.vendor.contactName || "Inbound Receiving") + " - " + shipment.vendor.contactPhone : ""), 9, false, 11, [0.2, 0.2, 0.2]);
-    y += addrLines * 11 + 8;
+    pdf.text(pad + 8, y + 8, v.name + (v.warehouseLabel ? " - " + v.warehouseLabel : ""), size ? 10 : 11, true, PDF_INK);
+    y += 19;
+    var addrLines = pdf.textWrapped(pad + 8, y, contentW - 16, toText, addrFont, false, addrFont + 2, [0.2, 0.2, 0.2]);
+    y += addrLines * (addrFont + 2) + 6;
     pdf.rect(pad, boxTop, contentW, y - boxTop, "stroke", PDF_INK, null, 1.2);
-    y += 16;
 
     var boxQty = box.rows.reduce(function (s, r) { return s + (r.qty || 0); }, 0);
-    pdf.text(pad, y, "CONTENTS - THIS BOX", 6.5, true, PDF_MUTED);
-    y += 24;
-    pdf.text(pad, y, String(boxQty), 26, true, PDF_INK);
-    pdf.text(pad + 44, y - 3, "unit" + (boxQty === 1 ? "" : "s") + " - " + box.rows.length + " return line" + (box.rows.length === 1 ? "" : "s"), 8, false, [0.3, 0.3, 0.3]);
-    y += 16;
-    pdf.text(pad, y, "Tracking detail is on the invoice packed with this shipment", 6.8, false, PDF_MUTED);
-
     var footY = H - pad - 22;
+    var cy = footY - 10;
+    pdf.text(pad, cy, "THIS BOX", 6.5, true, PDF_MUTED);
+    pdf.text(pad + 40, cy, boxQty + " unit" + (boxQty === 1 ? "" : "s") + " - " + box.rows.length + " return line" + (box.rows.length === 1 ? "" : "s"), 10, true, PDF_INK);
+
     pdf.dashedLine(pad, footY, W - pad, footY, 1, [0.69, 0.69, 0.69], 3);
     pdf.text(pad, footY + 12, "Keep dry - No stacking", 6.5, true, [0.3, 0.3, 0.3]);
     pdf.text(pad, footY + 22, "Sign & return the invoice packed with this shipment", 6.3, false, PDF_MUTED);
   }
-
   function drawInvoicePdfPages(pdf, shipment, copyType) {
+    var boxes = shipmentBoxes(shipment);
+    boxes.forEach(function (box, i) { drawInvoicePdfBoxPages(pdf, shipment, copyType, box, i + 1, boxes.length); });
+  }
+
+  function drawInvoicePdfBoxPages(pdf, shipment, copyType, box, boxIndex, totalBoxes) {
     var W = 595.28, H = 841.89, pad = 42, contentW = W - pad * 2;
     var isVendor = copyType === "vendor";
     var badgeText = isVendor ? "VENDOR COPY" : "TRANSPORTER COPY";
     var signLabel = isVendor ? "Received by - vendor warehouse" : "Handed over to - transporter";
     var totals = shipmentTotals(shipment);
-    var grandTotal = shipment.manifest.reduce(function (s, r) { return s + (r.mrp || 0) * (r.qty || 0); }, 0);
+    var grandTotal = rowsTotal(shipment.manifest);
+    var boxTotal = rowsTotal(box.rows);
 
     pdf.newPage(W, H);
     var y = pad;
@@ -1066,7 +1177,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     pdf.text(pad, y + 14, "Return Delivery Invoice", 20, true, PDF_INK);
     pdf.textRight(W - pad, y, "Invoice No. " + shipment.invoiceNo, 9.5, false, [0.3, 0.3, 0.3]);
     pdf.textRight(W - pad, y + 13, "Date " + formatDate(shipment.shipDate), 9.5, false, [0.3, 0.3, 0.3]);
-    y += 28;
+    pdf.textRight(W - pad, y + 27, "Box " + boxIndex + " of " + totalBoxes, 11, true, PDF_INK);
+    drawPdfBarcode(pdf, shipment.invoiceNo, pad, y + 26, 190, 26);
+    y += 58;
     pdf.line(pad, y, W - pad, y, 2, PDF_INK);
     y += 22;
 
@@ -1077,8 +1190,11 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     pdf.text(pad + 10, y + 2, "TO", 7, true, PDF_MUTED);
     var toLines = pdf.textWrapped(pad + 70, y + 2, contentW - 90, shipment.vendor.name + (shipment.vendor.warehouseLabel ? " - " + shipment.vendor.warehouseLabel : "") + " - " + shipment.vendor.address, 10, false, 12, PDF_INK);
     y += toLines * 12 + 6;
-    pdf.text(pad + 10, y + 2, "PACKAGES", 7, true, PDF_MUTED);
-    pdf.text(pad + 70, y + 2, totals.boxes + " box" + (totals.boxes === 1 ? "" : "es") + " - " + totals.returns + " returns - " + totals.units + " units", 10, false, PDF_INK);
+    pdf.text(pad + 10, y + 2, "THIS BOX", 7, true, PDF_MUTED);
+    pdf.text(pad + 70, y + 2, "Box " + boxIndex + " of " + totalBoxes + " - " + box.rows.length + " items - " + rowsUnits(box.rows) + " units - " + formatMoneyPdf(boxTotal), 10, false, PDF_INK);
+    y += 16;
+    pdf.text(pad + 10, y + 2, "INVOICE", 7, true, PDF_MUTED);
+    pdf.text(pad + 70, y + 2, totals.boxes + " box" + (totals.boxes === 1 ? "" : "es") + " - " + totals.returns + " items - " + totals.units + " units - " + formatMoneyPdf(grandTotal), 10, false, PDF_INK);
     y += 18;
     pdf.rect(pad, boxTop, contentW, y - boxTop, "stroke", PDF_INK, null, 1.2);
     y += 24;
@@ -1098,17 +1214,17 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     // Size the Tracking column to fit the longest actual tracking value (instead of a
     // fixed proportion) so IDs never get ellipsis-truncated.
     var trackingFontSize = 8.5;
-    var maxTrackingTextWidth = shipment.manifest.reduce(function (max, r) {
+    var maxTrackingTextWidth = box.rows.reduce(function (max, r) {
       return Math.max(max, pdfTextWidth(pdfSafe(r.tracking), trackingFontSize, false));
     }, pdfTextWidth("TRACKING", 7.5, true));
-    var mrpW = 0.20, qtyW = 0.16, boxW = 0.16, totalW = 0.22;
-    var trackingW = Math.max(1 - mrpW - qtyW - boxW - totalW, (maxTrackingTextWidth + 12) / contentW);
+    var skuW = 0.2, mrpW = 0.16, qtyW = 0.08, totalW = 0.18;
+    var trackingW = Math.max(1 - skuW - mrpW - qtyW - totalW, (maxTrackingTextWidth + 12) / contentW);
 
     var cols = [
       { key: "tracking", label: "TRACKING", w: trackingW, align: "left" },
+      { key: "sku", label: "SKU", w: skuW, align: "left" },
       { key: "mrp", label: "VALUE", w: mrpW, align: "right" },
       { key: "qty", label: "QTY", w: qtyW, align: "right" },
-      { key: "boxNo", label: "BOX", w: boxW, align: "right" },
       { key: "total", label: "TOTAL", w: totalW, align: "right" },
     ];
     var colX = [], cx = pad;
@@ -1127,18 +1243,19 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     drawTableHeader();
 
     var rowH = 15;
-    shipment.manifest.forEach(function (r) {
+    box.rows.forEach(function (r) {
       if (y + rowH > H - pad - 30) {
         pdf.newPage(W, H);
         y = pad;
-        pdf.text(pad, y + 10, "Return Delivery Invoice (continued) - " + shipment.invoiceNo, 11, true, PDF_INK);
+        pdf.text(pad, y + 10, "Return Delivery Invoice (continued) - " + shipment.invoiceNo + " - Box " + boxIndex + " of " + totalBoxes, 11, true, PDF_INK);
         y += 24;
         drawTableHeader();
       }
       var total = (r.mrp || 0) * (r.qty || 0);
       var vals = [
         pdfTruncate(r.tracking, contentW * cols[0].w - 6, 8.5),
-        formatMoneyPdf(r.mrp), String(r.qty), String(r.boxNo), formatMoneyPdf(total),
+        pdfTruncate(r.sku || "", contentW * cols[1].w - 6, 8.5),
+        formatMoneyPdf(r.mrp), String(r.qty), formatMoneyPdf(total),
       ];
       cols.forEach(function (c, i) {
         var xw = contentW * c.w;
@@ -1153,9 +1270,12 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     y += 6;
     pdf.line(pad, y, W - pad, y, 1.5, PDF_INK);
     y += 16;
-    pdf.text(pad, y, "GRAND TOTAL", 9, true, PDF_INK);
-    pdf.textRight(W - pad, y, formatMoneyPdf(grandTotal), 12, true, PDF_INK);
-    y += 32;
+    pdf.text(pad, y, "BOX " + boxIndex + " TOTAL", 9, true, PDF_INK);
+    pdf.textRight(W - pad, y, formatMoneyPdf(boxTotal), 12, true, PDF_INK);
+    y += 16;
+    pdf.text(pad, y, "Invoice total - all " + totalBoxes + " box" + (totalBoxes === 1 ? "" : "es"), 8.5, false, PDF_MUTED);
+    pdf.textRight(W - pad, y, formatMoneyPdf(grandTotal), 9.5, false, PDF_MUTED);
+    y += 26;
 
     pdf.line(pad, y, W - pad, y, 1.2, PDF_INK);
     y += 16;
@@ -1359,8 +1479,18 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     boxes.forEach(function (box, i) {
       sheets.push({ key: "box" + box.boxNo, label: "Box " + (i + 1) + " of " + boxes.length, html: labelSheetHtml(full, box, i + 1, boxes.length) });
     });
-    sheets.push({ key: "invoice-vendor", label: "Invoice — Vendor Copy", html: invoiceSheetHtml(full, "vendor") });
-    sheets.push({ key: "invoice-transporter", label: "Invoice — Transporter Copy", html: invoiceSheetHtml(full, "transporter") });
+    ["vendor", "transporter"].forEach(function (copy) {
+      boxes.forEach(function (box, i) {
+        var pages = chunkRows(box.rows, INVOICE_ROWS_PER_PAGE);
+        pages.forEach(function (rows, p) {
+          sheets.push({
+            key: "invoice-" + copy + "-box" + box.boxNo + "-p" + p,
+            label: (copy === "vendor" ? "Vendor" : "Transporter") + " copy · Box " + (i + 1) + (pages.length > 1 ? " (" + (p + 1) + "/" + pages.length + ")" : ""),
+            html: invoiceSheetHtml(full, copy, box, i + 1, boxes.length, { rows: rows, index: p, count: pages.length }),
+          });
+        });
+      });
+    });
     return sheets;
   }
 
