@@ -593,13 +593,13 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <div class="field-grid" style="grid-template-columns: 2fr 1fr auto; align-items:end; margin-bottom:14px;">
       <div class="field"><label for="brandsSearch">Search</label><input id="brandsSearch" placeholder="Brand, store or company…" autocomplete="off"></div>
       <div class="field"><label for="brandsLocFilter">Return location</label>
-        <select id="brandsLocFilter"><option value="">All</option><option value="Local">Local</option><option value="Non-Local">Non-Local</option><option value="none">Not set</option></select>
+        <select id="brandsLocFilter"><option value="">All</option><option value="Local">Local</option><option value="Non-Local">Non-Local</option><option value="none">Not set</option><option value="removed">Removed</option></select>
       </div>
       <button type="button" class="btn small secondary" id="brandsCsvBtn">Download CSV</button>
     </div>
     <p class="hint" id="brandsCount" style="margin:-4px 0 10px;"></p>
     <div class="table-wrap">
-      <table class="data-table"><thead><tr><th>Brand / store</th><th>Company</th><th>Pincode</th><th>Return location</th></tr></thead><tbody id="brandsBody"></tbody></table>
+      <table class="data-table"><thead><tr><th>Brand / store</th><th>Company</th><th>Pincode</th><th>Return location</th><th></th></tr></thead><tbody id="brandsBody"></tbody></table>
     </div>
   </div>
 </div>
@@ -2042,7 +2042,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     function renderList() {
       listWrap.innerHTML = "";
       var q = brandPickerQuery;
-      var filtered = q ? state.vendors.filter(function (v) { return vendorMatchesQuery(v, q); }) : state.vendors;
+      var active = state.vendors.filter(function (v) { return v.active !== false; });
+      var filtered = q ? active.filter(function (v) { return vendorMatchesQuery(v, q); }) : active;
       var groups = groupVendorsForPicker(filtered);
 
       if (groups.length === 0) {
@@ -2885,7 +2886,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     var q = document.getElementById("brandsSearch").value.trim().toLowerCase();
     var loc = document.getElementById("brandsLocFilter").value;
     return state.vendors.filter(function (v) {
-      if (loc === "none" ? v.returnLocation : loc && v.returnLocation !== loc) return false;
+      // Removed brands only show under the "Removed" filter.
+      if ((loc === "removed") !== (v.active === false)) return false;
+      if (loc === "none" ? v.returnLocation : loc && loc !== "removed" && v.returnLocation !== loc) return false;
       if (!q) return true;
       return [v.name, v.shortName, v.warehouseLabel, v.pincode].some(function (x) { return x && String(x).toLowerCase().indexOf(q) !== -1; });
     }).sort(function (a, b) { return a.name.localeCompare(b.name); });
@@ -2893,15 +2896,17 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 
   function renderBrands() {
     var rows = filteredBrands();
-    var notSet = state.vendors.filter(function (v) { return !v.returnLocation; }).length;
-    document.getElementById("brandsCount").textContent = rows.length + " of " + state.vendors.length + " brands shown" +
-      (notSet ? " · " + notSet + " without a return location" : "");
+    var activeBrands = state.vendors.filter(function (v) { return v.active !== false; });
+    var notSet = activeBrands.filter(function (v) { return !v.returnLocation; }).length;
+    var removed = state.vendors.length - activeBrands.length;
+    document.getElementById("brandsCount").textContent = rows.length + " shown · " + activeBrands.length + " brands in use" +
+      (notSet ? " · " + notSet + " without a return location" : "") + (removed ? " · " + removed + " removed" : "");
     var body = document.getElementById("brandsBody");
     body.innerHTML = "";
     rows.forEach(function (v) {
       var tr = document.createElement("tr");
       tr.innerHTML = "<td>" + escapeHtml(v.name) + (v.shortName ? " <span class='hint' style='margin:0;'>(" + escapeHtml(v.shortName) + ")</span>" : "") + "</td>" +
-        "<td>" + escapeHtml(v.warehouseLabel || "—") + "</td><td class='mono'>" + escapeHtml(v.pincode || "—") + "</td><td></td>";
+        "<td>" + escapeHtml(v.warehouseLabel || "—") + "</td><td class='mono'>" + escapeHtml(v.pincode || "—") + "</td><td></td><td></td>";
       var sel = document.createElement("select");
       [["", "Not set"], ["Local", "Local"], ["Non-Local", "Non-Local"]].forEach(function (o) {
         var opt = document.createElement("option");
@@ -2915,10 +2920,27 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
           .then(function (updated) { v.returnLocation = updated.returnLocation; toast(v.name + ": " + (v.returnLocation || "not set")); renderBrands(); })
           .catch(function (err) { toast(err.message, true); sel.value = v.returnLocation || ""; });
       });
-      tr.lastElementChild.appendChild(sel);
+      tr.children[3].appendChild(sel);
+      var toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "link-btn";
+      toggle.textContent = v.active === false ? "Restore" : "Remove";
+      toggle.addEventListener("click", function () {
+        var removing = v.active !== false;
+        if (removing && !window.confirm("Remove " + v.name + " from the brand list? Old invoices for it stay as they are; you can restore it later.")) return;
+        fetchJson("/api/vendors/" + v.id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: !removing }) })
+          .then(function (updated) {
+            v.active = updated.active;
+            toast((removing ? "Removed " : "Restored ") + v.name);
+            renderBrands();
+            renderBoxVendorPicker();
+          })
+          .catch(function (err) { toast(err.message, true); });
+      });
+      tr.lastElementChild.appendChild(toggle);
       body.appendChild(tr);
     });
-    if (!rows.length) body.innerHTML = "<tr><td colspan='4' class='empty-state'>No brands match.</td></tr>";
+    if (!rows.length) body.innerHTML = "<tr><td colspan='5' class='empty-state'>No brands match.</td></tr>";
   }
   document.getElementById("brandsSearch").addEventListener("input", renderBrands);
   document.getElementById("brandsLocFilter").addEventListener("change", renderBrands);

@@ -336,6 +336,9 @@ def init_db():
         ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pincode TEXT;
         -- 'Local' (Mumbai, POD photo required on delivery) or 'Non-Local'.
         ALTER TABLE vendors ADD COLUMN IF NOT EXISTS return_location TEXT;
+        -- Removed brands drop out of the brand picker but stay on the old
+        -- shipments and bookings that used them.
+        ALTER TABLE vendors ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
         CREATE TABLE IF NOT EXISTS master_items (
             tracking_id TEXT PRIMARY KEY,
             marketplace_order_id TEXT,
@@ -728,6 +731,16 @@ RETURN_LOCATION_RULES = [
     ("Sooperbuy Private Limited", ["Puma"], "Local"),
     ("REGAL BRANDS PRIVATE LIMITED", ["Regal", "Rocia", "Imperio", "Ragal"], "Local"),
     ("BATA", ["Bata Group of Brands", "Bata"], "Non-Local"),
+    # Not on the ops sheet; confirmed Local separately.
+    ("Fabindia Limited", ["Fabindia"], "Local"),
+    ("Kraus Casuals Private Limited", ["Kraus Jeans"], "Local"),
+    ("Me N Moms Private Limited", ["MeeMee"], "Local"),
+    ("Estele Accessories Private Limited", ["Estele"], "Local"),
+    ("Dhnishk Venture Private Limited", ["Freyaa"], "Local"),
+    ("One Life Creations", ["KidOne"], "Local"),
+    ("Zivore Apparels Pvt. Ltd.", ["Libas"], "Local"),
+    ("Crocs", ["Crocs"], "Local"),
+    ("Phoenix Palladium Mall", ["Phoenix Palladium Mall"], "Local"),
 ]
 RETURN_LOCATIONS = ("Local", "Non-Local")
 _COMPANY_NOISE = {"private", "pvt", "limited", "ltd", "the", "india", "group", "of", "brands", "and", "co"}
@@ -788,6 +801,7 @@ def vendor_to_dict(row):
         "contactEmail": row["contact_email"],
         "pincode": row["pincode"],
         "returnLocation": row.get("return_location"),
+        "active": row.get("active", True),
     }
 
 
@@ -1435,13 +1449,19 @@ class Handler(BaseHTTPRequestHandler):
     def update_vendor(self, vendor_id):
         self.require_admin()
         body = self.read_json_body()
-        if "returnLocation" not in body:
-            raise ApiError(400, "Nothing to update — send 'returnLocation'")
-        loc = (body.get("returnLocation") or "").strip() or None
-        if loc and loc not in RETURN_LOCATIONS:
-            raise ApiError(400, "returnLocation must be 'Local' or 'Non-Local'")
+        updates = {}
+        if "returnLocation" in body:
+            loc = (body.get("returnLocation") or "").strip() or None
+            if loc and loc not in RETURN_LOCATIONS:
+                raise ApiError(400, "returnLocation must be 'Local' or 'Non-Local'")
+            updates["return_location"] = loc
+        if "active" in body:
+            updates["active"] = bool(body.get("active"))
+        if not updates:
+            raise ApiError(400, "Nothing to update — send 'returnLocation' and/or 'active'")
         conn = get_db()
-        row = conn.execute("UPDATE vendors SET return_location = %s WHERE id = %s RETURNING *", (loc, vendor_id)).fetchone()
+        set_sql = ", ".join(f"{c} = %s" for c in updates)
+        row = conn.execute(f"UPDATE vendors SET {set_sql} WHERE id = %s RETURNING *", (*updates.values(), vendor_id)).fetchone()
         conn.commit()
         conn.close()
         if not row:
@@ -1828,6 +1848,9 @@ class Handler(BaseHTTPRequestHandler):
         if not hub or not vendor:
             conn.close()
             raise ApiError(400, "hubId or vendorId does not exist")
+        if not vendor["active"]:
+            conn.close()
+            raise ApiError(400, f"'{vendor['name']}' has been removed from the brand list")
 
         date_tag = ship_date.replace("-", "")
         # Several brands finished together arrive as parallel requests; the
