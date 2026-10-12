@@ -741,6 +741,8 @@ RETURN_LOCATION_RULES = [
     ("Zivore Apparels Pvt. Ltd.", ["Libas"], "Local"),
     ("Crocs", ["Crocs"], "Local"),
     ("Phoenix Palladium Mall", ["Phoenix Palladium Mall"], "Local"),
+    ("Aditya Birla Fashion and Retail", ["W", "Wishful"], "Non-Local"),  # Gurugram / Bangalore
+    ("American Eagle", ["American Eagle"], "Non-Local"),  # Bangalore
 ]
 RETURN_LOCATIONS = ("Local", "Non-Local")
 _COMPANY_NOISE = {"private", "pvt", "limited", "ltd", "the", "india", "group", "of", "brands", "and", "co"}
