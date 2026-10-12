@@ -167,6 +167,23 @@ body:not(.is-admin) .admin-only { display: none !important; }
 .login-card .btn { width: 100%; margin-top: 6px; }
 .login-card .field { margin-bottom: 12px; }
 
+/* ---- gate-out / delivery ---- */
+.scan-big { font: inherit; font-family: 'IBM Plex Mono', monospace; font-size: 18px; padding: 14px 14px; width: 100%; border-radius: 9px; border: 2px solid var(--line); background: var(--paper); color: var(--ink); }
+.scan-big:focus { outline: none; border-color: var(--accent); }
+.scan-result { margin-top: 12px; padding: 12px 14px; border-radius: 9px; border: 1.5px solid var(--line); font-size: 14px; display: none; }
+.scan-result.is-ok { display: block; border-color: var(--good); }
+.scan-result.is-bad { display: block; border-color: var(--bad); }
+.scan-result .big { font-size: 17px; font-weight: 800; }
+.scan-result.is-ok .big { color: var(--good); }
+.scan-result.is-bad .big { color: var(--bad); }
+.pill.status-Packed { color: var(--muted); }
+.pill.status-Dispatched { color: var(--warn); }
+.pill.status-Delivered { color: var(--good); }
+.deliver-row td { background: var(--zebra); }
+.deliver-form { display: grid; grid-template-columns: 160px 1fr 1fr auto; gap: 10px; align-items: end; }
+.deliver-form .field label { font-size: 11px; }
+@media (max-width: 820px) { .deliver-form { grid-template-columns: 1fr; } }
+
 /* ---- hub accounts ---- */
 .pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--zebra); color: var(--muted); }
 .pill.good { color: var(--good); }
@@ -292,6 +309,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   <div class="side-nav" id="topTabs" role="tablist" aria-orientation="vertical">
     <div class="side-nav-label">Shipments</div>
     <button type="button" id="tabPackShipments" aria-selected="true">Pack shipments</button>
+    <button type="button" id="tabGateOut" aria-selected="false">Gate-out</button>
+    <button type="button" id="tabDelivered" aria-selected="false">Mark delivered</button>
     <button type="button" id="tabShipmentArchive" aria-selected="false">Shipment archive</button>
     <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings</button>
     <div class="side-nav-label admin-only">Admin</div>
@@ -431,7 +450,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <input id="archiveSearch" placeholder="Invoice number, vendor or hub…" autocomplete="off">
     </div>
     <div class="table-wrap">
-      <table class="data-table"><thead><tr><th>Invoice No.</th><th>Ship date</th><th>Hub</th><th>Vendor</th><th>Boxes</th><th>Units</th><th>Amount</th></tr></thead><tbody id="archiveBody"></tbody></table>
+      <table class="data-table"><thead><tr><th>Invoice No.</th><th>Ship date</th><th>Hub</th><th>Vendor</th><th>Boxes</th><th>Units</th><th>Amount</th><th>Status</th></tr></thead><tbody id="archiveBody"></tbody></table>
     </div>
     <p class="empty-state" id="archiveEmpty" style="display:none;">No shipments found.</p>
   </div>
@@ -543,6 +562,50 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       </table>
     </div>
     <p class="empty-state" id="cbBookingsEmpty" style="display:none;">No courier bookings yet.</p>
+  </div>
+</div>
+
+<div class="app-shell" id="gateOutView" style="display:none; max-width: 1040px;">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · dispatch</p>
+      <h1>Gate-out</h1>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Scan to dispatch</h2>
+    <p class="hint">Scan the barcode on any box label (or the invoice) as it leaves the store. The whole invoice — every box on it — is marked dispatched.</p>
+    <input id="gateOutScan" class="scan-big" placeholder="Scan invoice barcode…" autocomplete="off" spellcheck="false">
+    <div class="scan-result" id="gateOutResult"></div>
+  </div>
+  <div class="card">
+    <h2>Dispatched today</h2>
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>Time</th><th>Invoice No.</th><th>Brand</th><th>Boxes</th><th>Units</th><th>By</th><th></th></tr></thead><tbody id="gateOutTodayBody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<div class="app-shell" id="deliveredView" style="display:none; max-width: 1100px;">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · delivery</p>
+      <h1>Mark delivered</h1>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Dispatched, waiting for delivery</h2>
+    <p class="hint">Scan or search an invoice, then add the delivery date and proof-of-delivery photo. The photo is <b>required for Local</b> brands and optional for Non-Local ones.</p>
+    <input id="deliverScan" class="scan-big" placeholder="Scan or type an invoice number…" autocomplete="off" spellcheck="false" style="margin-bottom:14px;">
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>Invoice No.</th><th>Brand</th><th>Return location</th><th>Boxes</th><th>Dispatched</th><th></th></tr></thead><tbody id="awaitingBody"></tbody></table>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Delivered in the last 7 days</h2>
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>Invoice No.</th><th>Brand</th><th>Delivered on</th><th>By</th><th>Proof of delivery</th></tr></thead><tbody id="deliveredRecentBody"></tbody></table>
+    </div>
   </div>
 </div>
 
@@ -2442,7 +2505,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
           "<td>" + escapeHtml(s.vendorName) + (s.warehouseLabel ? " — " + escapeHtml(s.warehouseLabel) : "") + "</td>" +
           "<td>" + s.boxes + "</td>" +
           "<td>" + s.units + "</td>" +
-          "<td class='mono'>" + formatMoney(s.amount) + "</td>"
+          "<td class='mono'>" + formatMoney(s.amount) + "</td>" +
+          "<td>" + statusCell(s) + "</td>"
         );
         body.appendChild(tr);
       });
@@ -2762,6 +2826,10 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     document.getElementById("tabDailyData").setAttribute("aria-selected", "false");
     document.getElementById("brandsView").style.display = "none";
     document.getElementById("tabBrands").setAttribute("aria-selected", "false");
+    document.getElementById("gateOutView").style.display = "none";
+    document.getElementById("tabGateOut").setAttribute("aria-selected", "false");
+    document.getElementById("deliveredView").style.display = "none";
+    document.getElementById("tabDelivered").setAttribute("aria-selected", "false");
     document.getElementById("tabPackShipments").setAttribute("aria-selected", "false");
     document.getElementById("tabShipmentArchive").setAttribute("aria-selected", "false");
     document.getElementById("tabCourierBookings").setAttribute("aria-selected", "false");
@@ -2871,6 +2939,215 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       .catch(function (err) { out.innerHTML = ""; errEl.textContent = "Import failed: " + err.message; e.target.value = ""; });
   });
 
+
+  // ================= dispatch status helpers =================
+  function statusCell(s) {
+    var html = "<span class='pill status-" + escapeHtml(s.status) + "'>" + escapeHtml(s.status) + "</span>";
+    if (s.podUrl) html += " <a href='" + escapeHtml(s.podUrl) + "' target='_blank' rel='noopener'>POD</a>";
+    return html;
+  }
+  function timeAgo(iso) {
+    var d = new Date(iso);
+    if (isNaN(d)) return "";
+    var mins = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
+    if (mins < 60) return mins + " min ago";
+    var hrs = Math.round(mins / 60);
+    if (hrs < 48) return hrs + " h ago";
+    return Math.round(hrs / 24) + " days ago";
+  }
+  function istToday() {
+    return new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+  }
+  function brandLabel(s) { return s.vendorName + (s.warehouseLabel ? " — " + s.warehouseLabel : ""); }
+
+  // ================= gate-out =================
+  function showGateOutView() {
+    currentTabShow = showGateOutView;
+    hideAllTabViews();
+    document.getElementById("gateOutView").style.display = "block";
+    document.getElementById("tabGateOut").setAttribute("aria-selected", "true");
+    loadGateOutToday();
+    document.getElementById("gateOutScan").focus();
+  }
+  document.getElementById("tabGateOut").addEventListener("click", showGateOutView);
+
+  function loadGateOutToday() {
+    return getJson("/api/shipments/by-status?status=dispatched&since=" + istToday()).then(function (rows) {
+      var body = document.getElementById("gateOutTodayBody");
+      body.innerHTML = "";
+      rows.forEach(function (s) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = "<td>" + escapeHtml(formatDateTime(s.dispatchedAt)) + "</td><td class='mono'>" + escapeHtml(s.invoiceNo) + "</td>" +
+          "<td>" + escapeHtml(brandLabel(s)) + "</td><td>" + s.boxes + "</td><td>" + s.units + "</td><td>" + escapeHtml(s.dispatchedBy || "") + "</td><td></td>";
+        var undo = document.createElement("button");
+        undo.type = "button";
+        undo.className = "link-btn";
+        undo.textContent = "Undo";
+        undo.addEventListener("click", function () {
+          if (!window.confirm("Undo the gate-out for " + s.invoiceNo + "? It goes back to packed, not dispatched.")) return;
+          postJson("/api/shipments/" + s.id + "/undo-gate-out", {})
+            .then(function () { toast("Gate-out undone: " + s.invoiceNo); return loadGateOutToday(); })
+            .catch(function (err) { toast(err.message, true); });
+        });
+        tr.lastElementChild.appendChild(undo);
+        body.appendChild(tr);
+      });
+      if (!rows.length) body.innerHTML = "<tr><td colspan='7' class='empty-state'>Nothing dispatched yet today.</td></tr>";
+    }).catch(function (err) { toast("Couldn't load today's dispatches: " + err.message, true); });
+  }
+
+  var gateOutBusy = false;
+  document.getElementById("gateOutScan").addEventListener("keydown", function (e) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    var input = this;
+    var code = input.value.trim();
+    input.value = "";
+    if (!code || gateOutBusy) return;
+    gateOutBusy = true;
+    var out = document.getElementById("gateOutResult");
+    postJson("/api/gate-out", { code: code })
+      .then(function (s) {
+        out.className = "scan-result is-ok";
+        out.innerHTML = "<div class='big'>Dispatched · " + escapeHtml(s.invoiceNo) + "</div>" +
+          escapeHtml(brandLabel(s)) + " · " + s.boxes + " box" + (s.boxes === 1 ? "" : "es") + " · " + s.units + " units";
+        return loadGateOutToday();
+      })
+      .catch(function (err) {
+        out.className = "scan-result is-bad";
+        out.innerHTML = "<div class='big'>Not dispatched</div>" + escapeHtml(err.message);
+      })
+      .then(function () { gateOutBusy = false; input.focus(); });
+  });
+
+  // ================= mark delivered =================
+  var awaiting = [];
+  function showDeliveredView() {
+    currentTabShow = showDeliveredView;
+    hideAllTabViews();
+    document.getElementById("deliveredView").style.display = "block";
+    document.getElementById("tabDelivered").setAttribute("aria-selected", "true");
+    loadDeliveryLists();
+    document.getElementById("deliverScan").focus();
+  }
+  document.getElementById("tabDelivered").addEventListener("click", showDeliveredView);
+
+  function loadDeliveryLists() {
+    var weekAgo = new Date(Date.now() + 5.5 * 3600000 - 7 * 86400000).toISOString().slice(0, 10);
+    return Promise.all([
+      getJson("/api/shipments/by-status?status=dispatched"),
+      getJson("/api/shipments/by-status?status=delivered&since=" + weekAgo),
+    ]).then(function (res) {
+      awaiting = res[0];
+      renderAwaiting();
+      var body = document.getElementById("deliveredRecentBody");
+      body.innerHTML = "";
+      res[1].forEach(function (s) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = "<td class='mono'>" + escapeHtml(s.invoiceNo) + "</td><td>" + escapeHtml(brandLabel(s)) + "</td>" +
+          "<td>" + escapeHtml(formatDate(s.deliveredOn)) + "</td><td>" + escapeHtml(s.deliveredBy || "") + "</td>" +
+          "<td>" + (s.podUrl ? "<a href='" + escapeHtml(s.podUrl) + "' target='_blank' rel='noopener'>Open photo</a>" : "<span class='hint' style='margin:0;'>No photo</span>") +
+          (s.deliveryNote ? " · " + escapeHtml(s.deliveryNote) : "") + "</td>";
+        body.appendChild(tr);
+      });
+      if (!res[1].length) body.innerHTML = "<tr><td colspan='5' class='empty-state'>Nothing delivered in the last 7 days.</td></tr>";
+    }).catch(function (err) { toast("Couldn't load deliveries: " + err.message, true); });
+  }
+
+  function renderAwaiting(openId) {
+    var q = document.getElementById("deliverScan").value.trim().toLowerCase();
+    var rows = awaiting.filter(function (s) {
+      return !q || s.invoiceNo.toLowerCase().indexOf(q) !== -1 || brandLabel(s).toLowerCase().indexOf(q) !== -1;
+    });
+    var body = document.getElementById("awaitingBody");
+    body.innerHTML = "";
+    rows.forEach(function (s) {
+      var tr = document.createElement("tr");
+      var loc = s.returnLocation || "Not set";
+      tr.innerHTML = "<td class='mono'>" + escapeHtml(s.invoiceNo) + "</td><td>" + escapeHtml(brandLabel(s)) + "</td>" +
+        "<td><span class='pill " + (loc === "Non-Local" ? "" : "warn") + "'>" + escapeHtml(loc) + "</span></td><td>" + s.boxes + "</td>" +
+        "<td>" + escapeHtml(timeAgo(s.dispatchedAt)) + "</td><td></td>";
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn small";
+      btn.textContent = "Mark delivered";
+      btn.addEventListener("click", function () { toggleDeliverForm(tr, s); });
+      tr.lastElementChild.appendChild(btn);
+      body.appendChild(tr);
+      if (openId === s.id) toggleDeliverForm(tr, s);
+    });
+    if (!rows.length) body.innerHTML = "<tr><td colspan='6' class='empty-state'>" + (q ? "No dispatched invoice matches." : "Nothing waiting for delivery.") + "</td></tr>";
+  }
+  document.getElementById("deliverScan").addEventListener("input", function () { renderAwaiting(); });
+  document.getElementById("deliverScan").addEventListener("keydown", function (e) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    var code = this.value.trim().toUpperCase();
+    var hit = awaiting.find(function (s) { return s.invoiceNo.toUpperCase() === code; });
+    if (hit) { renderAwaiting(hit.id); return; }
+    toast(code + " isn't in the dispatched list — gate it out first, or it may already be delivered", true);
+  });
+
+  // Phone photos are often 3-8 MB; shrink to <= 1600px JPEG before upload.
+  function compressPhoto(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        var k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+        var c = document.createElement("canvas");
+        c.width = Math.round(img.naturalWidth * k);
+        c.height = Math.round(img.naturalHeight * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        resolve(c.toDataURL("image/jpeg", 0.72).split(",")[1]);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("That file isn't a photo the browser can open")); };
+      img.src = url;
+    });
+  }
+
+  function toggleDeliverForm(tr, s) {
+    var next = tr.nextElementSibling;
+    if (next && next.classList.contains("deliver-row")) { next.remove(); return; }
+    var photoRequired = s.returnLocation !== "Non-Local";
+    var row = document.createElement("tr");
+    row.className = "deliver-row";
+    row.innerHTML = "<td colspan='6'><div class='deliver-form'>" +
+      "<div class='field'><label>Delivered on</label><input type='date' class='dv-date'></div>" +
+      "<div class='field'><label>Proof of delivery photo " + (photoRequired ? "(required)" : "(optional)") + "</label><input type='file' class='dv-photo' accept='image/*' capture='environment'></div>" +
+      "<div class='field'><label>Note (optional)</label><input type='text' class='dv-note' maxlength='500' placeholder='Received by…'></div>" +
+      "<button type='button' class='btn small dv-save'>Save</button>" +
+      "</div><p class='field-error dv-err' style='margin:6px 0 0;'></p></td>";
+    var dateEl = row.querySelector(".dv-date");
+    dateEl.value = istToday();
+    dateEl.min = s.shipDate;
+    dateEl.max = istToday();
+    var err = row.querySelector(".dv-err");
+    row.querySelectorAll("input").forEach(function (el) { el.addEventListener("input", function () { err.textContent = ""; }); });
+    var save = row.querySelector(".dv-save");
+    save.addEventListener("click", function () {
+      var file = row.querySelector(".dv-photo").files[0];
+      if (!dateEl.value) { err.textContent = "Pick the delivery date."; return; }
+      if (photoRequired && !file) { err.textContent = "Add the proof-of-delivery photo — it's required for Local brands."; return; }
+      save.disabled = true;
+      save.textContent = file ? "Uploading…" : "Saving…";
+      (file ? compressPhoto(file) : Promise.resolve(null))
+        .then(function (b64) {
+          return postJson("/api/shipments/" + s.id + "/deliver", {
+            deliveredOn: dateEl.value, note: row.querySelector(".dv-note").value.trim(),
+            photoBase64: b64 || "", photoMimeType: "image/jpeg",
+          });
+        })
+        .then(function (done) {
+          toast("Delivered: " + done.invoiceNo);
+          document.getElementById("deliverScan").value = "";
+          return loadDeliveryLists();
+        })
+        .catch(function (e) { err.textContent = e.message; save.disabled = false; save.textContent = "Save"; });
+    });
+    tr.after(row);
+  }
 
   // ================= brands (admin): return location =================
   function showBrandsView() {

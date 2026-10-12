@@ -9,6 +9,7 @@ Local run:  DATABASE_URL=postgresql://... python rtv-shipment-server.py [port]
 Hosted (Render): reads DATABASE_URL and PORT from the environment.
 First admin:  python rtv-shipment-server.py create-admin <username>
 """
+import base64
 import csv
 import getpass
 import hashlib
@@ -21,6 +22,8 @@ import secrets
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import zipfile
 from datetime import datetime, timedelta, timezone
 from http.cookies import SimpleCookie
@@ -474,6 +477,16 @@ def init_db():
             error TEXT
         );
         ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS sku TEXT;
+        -- Gate-out and delivery are per invoice: one scan of the invoice
+        -- barcode dispatches every box on it.
+        ALTER TABLE shipments ADD COLUMN IF NOT EXISTS dispatched_at TEXT;
+        ALTER TABLE shipments ADD COLUMN IF NOT EXISTS dispatched_by TEXT;
+        ALTER TABLE shipments ADD COLUMN IF NOT EXISTS delivered_on TEXT;
+        ALTER TABLE shipments ADD COLUMN IF NOT EXISTS delivered_at TEXT;
+        ALTER TABLE shipments ADD COLUMN IF NOT EXISTS delivered_by TEXT;
+        ALTER TABLE shipments ADD COLUMN IF NOT EXISTS delivery_note TEXT;
+        ALTER TABLE shipments ADD COLUMN IF NOT EXISTS pod_url TEXT;
+        ALTER TABLE shipments ADD COLUMN IF NOT EXISTS pod_file_id TEXT;
         """
     )
     conn.commit()
@@ -872,6 +885,81 @@ def courier_booking_to_dict(row):
     return out
 
 
+MAX_POD_BYTES = 12 * 1024 * 1024
+
+
+def shipment_status(row):
+    if row["delivered_at"]:
+        return "Delivered"
+    if row["dispatched_at"]:
+        return "Dispatched"
+    return "Packed"
+
+
+# Shared SELECT for every list that shows invoice-level dispatch status.
+SHIPMENT_LIST_SQL = """
+    SELECT s.id, s.invoice_no, s.ship_date, s.created_at, s.hub_id,
+           s.dispatched_at, s.dispatched_by, s.delivered_on, s.delivered_at, s.delivered_by,
+           s.delivery_note, s.pod_url,
+           h.name AS hub_name, v.name AS vendor_name, v.warehouse_label, v.return_location,
+           (SELECT COUNT(DISTINCT box_no) FROM shipment_items WHERE shipment_id = s.id) AS boxes,
+           (SELECT COUNT(*) FROM shipment_items WHERE shipment_id = s.id) AS lines,
+           (SELECT COALESCE(SUM(qty), 0) FROM shipment_items WHERE shipment_id = s.id) AS units,
+           (SELECT COALESCE(SUM(qty * value), 0) FROM shipment_items WHERE shipment_id = s.id) AS amount
+    FROM shipments s
+    JOIN hubs h ON h.id = s.hub_id
+    JOIN vendors v ON v.id = s.vendor_id
+"""
+
+
+def shipment_list_dict(r):
+    return {
+        "id": r["id"],
+        "invoiceNo": r["invoice_no"],
+        "shipDate": r["ship_date"],
+        "createdAt": r["created_at"],
+        "hubName": r["hub_name"],
+        "vendorName": r["vendor_name"],
+        "warehouseLabel": r["warehouse_label"],
+        "returnLocation": r["return_location"],
+        "boxes": r["boxes"],
+        "lines": r["lines"],
+        "units": r["units"],
+        "amount": r["amount"],
+        "status": shipment_status(r),
+        "dispatchedAt": r["dispatched_at"],
+        "dispatchedBy": r["dispatched_by"],
+        "deliveredOn": r["delivered_on"],
+        "deliveredAt": r["delivered_at"],
+        "deliveredBy": r["delivered_by"],
+        "deliveryNote": r["delivery_note"],
+        "podUrl": r["pod_url"],
+    }
+
+
+def upload_pod_to_drive(data, mime_type, filename, month):
+    """Send a POD photo to the Drive Apps Script (apps-script/pod-upload.gs);
+    returns (file_id, url)."""
+    url = (os.environ.get("POD_UPLOAD_URL") or "").strip()
+    secret = (os.environ.get("POD_UPLOAD_SECRET") or "").strip()
+    if not url or not secret:
+        raise ApiError(503, "Photo upload isn't set up on the server yet (POD_UPLOAD_URL / POD_UPLOAD_SECRET)")
+    body = json.dumps({
+        "secret": secret, "filename": filename, "mimeType": mime_type, "month": month,
+        "dataBase64": base64.b64encode(data).decode("ascii"),
+    }).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST", headers={"Content-Type": "application/json"})
+    try:
+        # Apps Script answers with a redirect to the result, which urllib follows.
+        with urllib.request.urlopen(req, timeout=90) as res:
+            reply = json.loads(res.read())
+    except (urllib.error.URLError, TimeoutError, ValueError) as e:
+        raise ApiError(502, f"Couldn't save the photo to Google Drive: {e}")
+    if not reply.get("ok"):
+        raise ApiError(502, "Google Drive refused the photo: " + str(reply.get("error")))
+    return reply.get("id"), reply.get("url")
+
+
 class ApiError(Exception):
     def __init__(self, status, message):
         super().__init__(message)
@@ -1109,6 +1197,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.lookup_tracking(tracking)
             if path == "/api/shipments":
                 return self.list_shipments()
+            if path == "/api/shipments/by-status":
+                return self.list_shipments_by_status(
+                    (qs.get("status") or [""])[0].strip(), (qs.get("q") or [""])[0].strip(),
+                    (qs.get("since") or [""])[0].strip())
             if path == "/api/shipments/archive":
                 q = (qs.get("q") or [""])[0].strip()
                 return self.list_shipments_archive(q)
@@ -1157,6 +1249,14 @@ class Handler(BaseHTTPRequestHandler):
             self.require_user()
             if path == "/api/view-hub":
                 return self.set_view_hub()
+            if path == "/api/gate-out":
+                return self.gate_out()
+            m = re.match(r"^/api/shipments/(\d+)/undo-gate-out$", path)
+            if m:
+                return self.undo_gate_out(int(m.group(1)))
+            m = re.match(r"^/api/shipments/(\d+)/deliver$", path)
+            if m:
+                return self.mark_delivered(int(m.group(1)))
             if path == "/api/users":
                 return self.create_user()
             if path == "/api/hubs":
@@ -1741,41 +1841,156 @@ class Handler(BaseHTTPRequestHandler):
             where_sql += " AND (s.invoice_no ILIKE %s OR v.name ILIKE %s OR h.name ILIKE %s)"
             like = f"%{q}%"
             params += [like, like, like]
-        rows = conn.execute(
-            f"""
-            SELECT s.id, s.invoice_no, s.ship_date, s.created_at,
-                   h.name AS hub_name, v.name AS vendor_name, v.warehouse_label,
-                   (SELECT COUNT(DISTINCT box_no) FROM shipment_items WHERE shipment_id = s.id) AS boxes,
-                   (SELECT COUNT(*) FROM shipment_items WHERE shipment_id = s.id) AS lines,
-                   (SELECT COALESCE(SUM(qty), 0) FROM shipment_items WHERE shipment_id = s.id) AS units,
-                   (SELECT COALESCE(SUM(qty * value), 0) FROM shipment_items WHERE shipment_id = s.id) AS amount
-            FROM shipments s
-            JOIN hubs h ON h.id = s.hub_id
-            JOIN vendors v ON v.id = s.vendor_id
-            {where_sql}
-            ORDER BY s.id DESC
-            LIMIT 5000
-            """,
-            tuple(params),
-        ).fetchall()
+        rows = conn.execute(SHIPMENT_LIST_SQL + where_sql + " ORDER BY s.id DESC LIMIT 5000", tuple(params)).fetchall()
         conn.close()
-        out = [
-            {
-                "id": r["id"],
-                "invoiceNo": r["invoice_no"],
-                "shipDate": r["ship_date"],
-                "createdAt": r["created_at"],
-                "hubName": r["hub_name"],
-                "vendorName": r["vendor_name"],
-                "warehouseLabel": r["warehouse_label"],
-                "boxes": r["boxes"],
-                "lines": r["lines"],
-                "units": r["units"],
-                "amount": r["amount"],
-            }
-            for r in rows
-        ]
-        self.send_json(200, out)
+        self.send_json(200, [shipment_list_dict(r) for r in rows])
+
+    # status: packed | dispatched | delivered. since (YYYY-MM-DD, IST) limits
+    # to invoices dispatched/delivered on or after that day.
+    def list_shipments_by_status(self, status, q, since):
+        conds = {
+            "packed": "s.dispatched_at IS NULL",
+            "dispatched": "s.dispatched_at IS NOT NULL AND s.delivered_at IS NULL",
+            "delivered": "s.delivered_at IS NOT NULL",
+        }
+        if status not in conds:
+            raise ApiError(400, "status must be packed, dispatched or delivered")
+        hub_sql, params = self.hub_filter("s.hub_id")
+        where_sql = "WHERE " + conds[status] + hub_sql
+        if since:
+            try:
+                day = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=IST)
+            except ValueError:
+                raise ApiError(400, "since must be YYYY-MM-DD")
+            col = "s.delivered_at" if status == "delivered" else "s.dispatched_at" if status == "dispatched" else "s.created_at"
+            where_sql += f" AND {col} >= %s"
+            params.append(day.astimezone(timezone.utc).isoformat())
+        if q:
+            where_sql += " AND (s.invoice_no ILIKE %s OR v.name ILIKE %s)"
+            params += [f"%{q}%", f"%{q}%"]
+        order = {"packed": "s.id", "dispatched": "s.dispatched_at", "delivered": "s.delivered_at"}[status]
+        conn = get_db()
+        rows = conn.execute(SHIPMENT_LIST_SQL + where_sql + f" ORDER BY {order} DESC LIMIT 2000", tuple(params)).fetchall()
+        conn.close()
+        self.send_json(200, [shipment_list_dict(r) for r in rows])
+
+    def find_scoped_shipment(self, conn, shipment_id=None, invoice_no=None):
+        if invoice_no is not None:
+            row = conn.execute(SHIPMENT_LIST_SQL + "WHERE upper(s.invoice_no) = upper(%s)", (invoice_no,)).fetchone()
+        else:
+            row = conn.execute(SHIPMENT_LIST_SQL + "WHERE s.id = %s", (shipment_id,)).fetchone()
+        scoped = self.scope_hub_id()
+        if row and scoped is not None and row["hub_id"] != scoped:
+            # Say so plainly — a hub scanning another hub's box should know why.
+            raise ApiError(403, f"{row['invoice_no']} belongs to {row['hub_name']}, not your hub")
+        return row
+
+    def gate_out(self):
+        user = self.require_user()
+        body = self.read_json_body()
+        code = (body.get("code") or "").strip()
+        if not code:
+            raise ApiError(400, "Scan an invoice barcode")
+        conn = get_db()
+        row = self.find_scoped_shipment(conn, invoice_no=code)
+        if not row:
+            conn.close()
+            raise ApiError(404, f"No invoice {code} — scan the barcode on the box label or invoice")
+        if row["dispatched_at"]:
+            conn.close()
+            raise ApiError(409, f"{row['invoice_no']} was already dispatched ({row['dispatched_at']}, by {row['dispatched_by']})")
+        now = datetime.now(timezone.utc).isoformat()
+        # The WHERE guard makes a double scan from two devices dispatch once.
+        updated = conn.execute(
+            "UPDATE shipments SET dispatched_at = %s, dispatched_by = %s WHERE id = %s AND dispatched_at IS NULL RETURNING id",
+            (now, user["username"], row["id"]),
+        ).fetchone()
+        conn.commit()
+        if not updated:
+            conn.close()
+            raise ApiError(409, f"{row['invoice_no']} was just dispatched by someone else")
+        row = self.find_scoped_shipment(conn, shipment_id=row["id"])
+        conn.close()
+        self.send_json(200, shipment_list_dict(row))
+
+    def undo_gate_out(self, shipment_id):
+        self.require_user()
+        conn = get_db()
+        row = self.find_scoped_shipment(conn, shipment_id=shipment_id)
+        if not row:
+            conn.close()
+            raise ApiError(404, "Shipment not found")
+        if row["delivered_at"]:
+            conn.close()
+            raise ApiError(409, "Already marked delivered — can't undo the dispatch")
+        if not row["dispatched_at"]:
+            conn.close()
+            raise ApiError(409, "Not dispatched yet")
+        conn.execute("UPDATE shipments SET dispatched_at = NULL, dispatched_by = NULL WHERE id = %s", (shipment_id,))
+        conn.commit()
+        conn.close()
+        self.send_json(200, {"id": shipment_id, "status": "Packed"})
+
+    def mark_delivered(self, shipment_id):
+        user = self.require_user()
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length > MAX_POD_BYTES * 2:  # base64 inflates the photo by ~4/3
+            raise ApiError(413, "Photo is too large")
+        body = self.read_json_body()
+        delivered_on = (body.get("deliveredOn") or "").strip()
+        try:
+            datetime.strptime(delivered_on, "%Y-%m-%d")
+        except ValueError:
+            raise ApiError(400, "Pick the delivery date")
+        note = (body.get("note") or "").strip()[:500] or None
+        photo_b64 = body.get("photoBase64") or ""
+        mime = (body.get("photoMimeType") or "image/jpeg").strip()
+        if photo_b64 and not mime.startswith("image/"):
+            raise ApiError(400, "The proof of delivery must be a photo")
+
+        conn = get_db()
+        row = self.find_scoped_shipment(conn, shipment_id=shipment_id)
+        if not row:
+            conn.close()
+            raise ApiError(404, "Shipment not found")
+        if not row["dispatched_at"]:
+            conn.close()
+            raise ApiError(409, "Gate-out this invoice before marking it delivered")
+        if row["delivered_at"]:
+            conn.close()
+            raise ApiError(409, f"{row['invoice_no']} is already marked delivered")
+        if delivered_on < row["ship_date"]:
+            conn.close()
+            raise ApiError(400, "Delivery date can't be before the invoice's ship date")
+        # Local brands (and any brand without a return location yet) need the photo.
+        if row["return_location"] != "Non-Local" and not photo_b64:
+            conn.close()
+            raise ApiError(400, "A proof-of-delivery photo is required for Local deliveries")
+        conn.close()  # don't hold a connection while the photo goes to Drive
+
+        file_id = pod_url = None
+        if photo_b64:
+            try:
+                data = base64.b64decode(photo_b64, validate=True)
+            except (ValueError, TypeError):
+                raise ApiError(400, "The photo didn't upload properly — try again")
+            if len(data) > MAX_POD_BYTES:
+                raise ApiError(413, "Photo is too large")
+            ext = "png" if mime == "image/png" else "jpg"
+            file_id, pod_url = upload_pod_to_drive(data, mime, f"{row['invoice_no']}-POD-{delivered_on}.{ext}", delivered_on[:7])
+
+        conn = get_db()
+        updated = conn.execute(
+            "UPDATE shipments SET delivered_on = %s, delivered_at = %s, delivered_by = %s, delivery_note = %s, "
+            "pod_url = %s, pod_file_id = %s WHERE id = %s AND delivered_at IS NULL RETURNING id",
+            (delivered_on, datetime.now(timezone.utc).isoformat(), user["username"], note, pod_url, file_id, shipment_id),
+        ).fetchone()
+        conn.commit()
+        row = self.find_scoped_shipment(conn, shipment_id=shipment_id)
+        conn.close()
+        if not updated:
+            raise ApiError(409, "Already marked delivered")
+        self.send_json(200, shipment_list_dict(row))
 
     def get_shipment(self, shipment_id):
         conn = get_db()
