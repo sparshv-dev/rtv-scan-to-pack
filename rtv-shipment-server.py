@@ -1718,6 +1718,10 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(400, "hubId or vendorId does not exist")
 
         date_tag = ship_date.replace("-", "")
+        # Several brands finished together arrive as parallel requests; the
+        # lock (held until commit) makes them take turns, so each gets its
+        # own next number instead of two requests reading the same count.
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"invoice-seq:{hub_id}:{ship_date}",))
         seq = conn.execute(
             "SELECT COUNT(*) AS count FROM shipments WHERE hub_id = %s AND ship_date = %s", (hub_id, ship_date)
         ).fetchone()["count"] + 1

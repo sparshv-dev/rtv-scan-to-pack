@@ -443,14 +443,14 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   <div class="print-toolbar no-print">
     <div class="meta"><b id="metaVendor"></b> · <span id="metaHub"></span> · <span id="metaTotals"></span></div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
-      <button type="button" class="btn secondary" id="printOneBtn">Print this sheet</button>
-      <button type="button" class="btn secondary" id="printLabelsBtn">Print box label(s) — 4×6</button>
-      <button type="button" class="btn" id="printInvoicesBtn">Print both invoices — A4</button>
+      <button type="button" class="btn" id="printLabelsPdfBtn">All labels (PDF, 4×6)</button>
+      <button type="button" class="btn" id="printInvoicesPdfBtn">All invoices (PDF, A4)</button>
+      <button type="button" class="btn secondary" id="printOneBtn">Print this sheet only</button>
       <button type="button" class="btn secondary" id="printEmailBtn">Email</button>
     </div>
   </div>
   <div id="printEmailPanel" class="no-print"></div>
-  <p class="no-print" style="margin: -8px 0 4px; font-size: 12.5px; color: var(--muted); max-width: 62ch;">Box labels and invoices are printed as separate jobs, at their own paper size — send them to your label printer and office printer separately.</p>
+  <p class="no-print" style="margin: -8px 0 4px; font-size: 12.5px; color: var(--muted); max-width: 62ch;">Labels and invoices come as two PDFs, each at its own paper size: send the labels PDF to the label printer and the invoices PDF to the office printer. Invoices are in box order (Box 1 vendor + transporter copy, then Box 2…), so each box's papers come off the printer together.</p>
   <div class="stage">
     <div class="sheet-picker no-print" id="sheetPicker"></div>
     <div id="sheetsContainer"></div>
@@ -464,6 +464,14 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <h1 id="batchTitle">Batch</h1>
     </div>
     <button type="button" class="link-btn" id="batchBackLink">&larr; Back</button>
+  </div>
+  <div class="card no-print print-all-card">
+    <h2>Print everything</h2>
+    <p class="hint" id="batchPrintHint"></p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button type="button" class="btn" id="batchLabelsPdfBtn">All labels (PDF, 4×6)</button>
+      <button type="button" class="btn" id="batchInvoicesPdfBtn">All invoices (PDF, A4)</button>
+    </div>
   </div>
   <div class="brand-tabs" id="brandTabs" role="tablist"></div>
   <div id="brandPanels"></div>
@@ -1155,11 +1163,6 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     pdf.text(pad, footY + 12, "Keep dry - No stacking", 6.5, true, [0.3, 0.3, 0.3]);
     pdf.text(pad, footY + 22, "Sign & return the invoice packed with this shipment", 6.3, false, PDF_MUTED);
   }
-  function drawInvoicePdfPages(pdf, shipment, copyType) {
-    var boxes = shipmentBoxes(shipment);
-    boxes.forEach(function (box, i) { drawInvoicePdfBoxPages(pdf, shipment, copyType, box, i + 1, boxes.length); });
-  }
-
   function drawInvoicePdfBoxPages(pdf, shipment, copyType, box, boxIndex, totalBoxes) {
     var W = 595.28, H = 841.89, pad = 42, contentW = W - pad * 2;
     var isVendor = copyType === "vendor";
@@ -1295,13 +1298,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     return String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
   }
 
-  function downloadBrandPdf(shipment) {
-    var pdf = createPdfDoc();
-    var boxes = shipmentBoxes(shipment);
-    boxes.forEach(function (box, i) { drawLabelPdfPage(pdf, shipment, box, i + 1, boxes.length); });
-    drawInvoicePdfPages(pdf, shipment, "vendor");
-    drawInvoicePdfPages(pdf, shipment, "transporter");
-
+  function savePdf(pdf, filename) {
     var pdfString = pdf.build();
     var bytes = new Uint8Array(pdfString.length);
     for (var i = 0; i < pdfString.length; i++) bytes[i] = pdfString.charCodeAt(i) & 0xFF;
@@ -1309,11 +1306,41 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
     a.href = url;
-    a.download = shipment.invoiceNo + "-" + slugify(shipment.vendor.name) + ".pdf";
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+
+  // One file for the whole job, however many brands and boxes: the store
+  // prints it in one go. shipments: [{ invoiceNo, shipDate, hub, vendor, manifest }].
+  function combinedPdfName(shipments, kind) {
+    if (shipments.length === 1) return shipments[0].invoiceNo + "-" + kind + ".pdf";
+    return "RTV-" + (shipments[0].hub.code || "hub") + "-" + shipments[0].shipDate + "-" + kind + ".pdf";
+  }
+
+  function downloadAllLabelsPdf(shipments) {
+    var pdf = createPdfDoc();
+    shipments.forEach(function (sh) {
+      var boxes = shipmentBoxes(sh);
+      boxes.forEach(function (box, i) { drawLabelPdfPage(pdf, sh, box, i + 1, boxes.length); });
+    });
+    savePdf(pdf, combinedPdfName(shipments, "labels"));
+  }
+
+  // Box by box, vendor copy then transporter copy, so each box's papers
+  // come off the printer together.
+  function downloadAllInvoicesPdf(shipments) {
+    var pdf = createPdfDoc();
+    shipments.forEach(function (sh) {
+      var boxes = shipmentBoxes(sh);
+      boxes.forEach(function (box, i) {
+        drawInvoicePdfBoxPages(pdf, sh, "vendor", box, i + 1, boxes.length);
+        drawInvoicePdfBoxPages(pdf, sh, "transporter", box, i + 1, boxes.length);
+      });
+    });
+    savePdf(pdf, combinedPdfName(shipments, "invoices"));
   }
 
   // ================= Excel (.xlsx) export (no external library) =================
@@ -1479,8 +1506,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     boxes.forEach(function (box, i) {
       sheets.push({ key: "box" + box.boxNo, label: "Box " + (i + 1) + " of " + boxes.length, html: labelSheetHtml(full, box, i + 1, boxes.length) });
     });
-    ["vendor", "transporter"].forEach(function (copy) {
-      boxes.forEach(function (box, i) {
+    boxes.forEach(function (box, i) {
+      ["vendor", "transporter"].forEach(function (copy) {
         var pages = chunkRows(box.rows, INVOICE_ROWS_PER_PAGE);
         pages.forEach(function (rows, p) {
           sheets.push({
@@ -1728,6 +1755,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   // full: { invoiceNo, shipDate, hub, vendor, manifest } — the shape GET
   // /api/shipments/:id returns.
   function openPrintView(full) {
+    printViewShipment = full;
     var totals = shipmentTotals(full);
 
     document.getElementById("formView").style.display = "none";
@@ -1765,11 +1793,12 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       views.forEach(function (v) { v.classList.add("print-include"); });
     }, 500);
   }
-  document.getElementById("printLabelsBtn").addEventListener("click", function () {
-    printSheets(function (v) { return v.dataset.key.indexOf("box") === 0; }, "4in 6in");
+  var printViewShipment = null; // the shipment open in the print view
+  document.getElementById("printLabelsPdfBtn").addEventListener("click", function () {
+    if (printViewShipment) downloadAllLabelsPdf([printViewShipment]);
   });
-  document.getElementById("printInvoicesBtn").addEventListener("click", function () {
-    printSheets(function (v) { return v.dataset.key.indexOf("invoice") === 0; }, "A4");
+  document.getElementById("printInvoicesPdfBtn").addEventListener("click", function () {
+    if (printViewShipment) downloadAllInvoicesPdf([printViewShipment]);
   });
   document.getElementById("printOneBtn").addEventListener("click", function () {
     var active = document.querySelector("#sheetsContainer .sheet-view.is-active");
@@ -2213,7 +2242,18 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   });
 
   // ================= batch view (brand-wise tabs) =================
+  var batchShipments = []; // every brand's shipment in the batch on screen
+  document.getElementById("batchLabelsPdfBtn").addEventListener("click", function () { downloadAllLabelsPdf(batchShipments); });
+  document.getElementById("batchInvoicesPdfBtn").addEventListener("click", function () { downloadAllInvoicesPdf(batchShipments); });
+
   function openBatchView(entries) {
+    batchShipments = entries.map(function (entry) {
+      return { invoiceNo: entry.shipment.invoiceNo, shipDate: entry.shipment.shipDate, hub: entry.hub, vendor: entry.vendor, manifest: entry.shipment.manifest };
+    });
+    var allBoxes = batchShipments.reduce(function (n, sh) { return n + shipmentBoxes(sh).length; }, 0);
+    document.getElementById("batchPrintHint").textContent =
+      batchShipments.length + " invoice" + (batchShipments.length === 1 ? "" : "s") + " · " + allBoxes + " box" + (allBoxes === 1 ? "" : "es") +
+      ". One PDF with every box label (for the label printer) and one with every box-wise invoice (for the office printer). Invoices come box by box: vendor copy, then transporter copy.";
     document.getElementById("formView").style.display = "none";
     document.getElementById("printView").style.display = "none";
     document.getElementById("batchView").style.display = "block";
@@ -2250,11 +2290,6 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       dlXlsBtn.className = "btn secondary";
       dlXlsBtn.textContent = "Download Excel";
       dlXlsBtn.addEventListener("click", function () { downloadBrandExcel(full); });
-      var dlBtn = document.createElement("button");
-      dlBtn.type = "button";
-      dlBtn.className = "btn";
-      dlBtn.textContent = "Download PDF";
-      dlBtn.addEventListener("click", function () { downloadBrandPdf(full); });
       var emailPanel = buildEmailPanel(full);
       var emailBtn = document.createElement("button");
       emailBtn.type = "button";
@@ -2263,7 +2298,6 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       emailBtn.addEventListener("click", function () { emailPanel.classList.toggle("is-open"); });
       dlActions.appendChild(emailBtn);
       dlActions.appendChild(dlXlsBtn);
-      dlActions.appendChild(dlBtn);
       head.appendChild(headInfo);
       head.appendChild(dlActions);
       panel.appendChild(head);
