@@ -510,6 +510,15 @@ def init_db():
             )
     conn.commit()
 
+    # Invoices packed before gate-out existed were never scanned out, so the
+    # open-shipment lists only count invoices from this date on. Set once,
+    # the first time this version starts; admins can move it.
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('dispatch_tracking_from', %s) ON CONFLICT (key) DO NOTHING",
+        (datetime.now(IST).strftime("%Y-%m-%d"),),
+    )
+    conn.commit()
+
     # Fill Return location from the seller sheet for any brand that doesn't
     # have one yet — never overwrites a value someone has set by hand.
     for r in conn.execute("SELECT id, name, warehouse_label FROM vendors WHERE return_location IS NULL").fetchall():
@@ -1197,6 +1206,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.lookup_tracking(tracking)
             if path == "/api/shipments":
                 return self.list_shipments()
+            if path == "/api/shipments/open":
+                return self.list_open_shipments()
+            if path == "/api/shipments/to-mark-delivered":
+                return self.list_to_mark_delivered()
+            if path == "/api/settings/tracking-from":
+                return self.send_json(200, {"trackingFrom": self.tracking_from()})
             if path == "/api/shipments/by-status":
                 return self.list_shipments_by_status(
                     (qs.get("status") or [""])[0].strip(), (qs.get("q") or [""])[0].strip(),
@@ -1251,6 +1266,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.set_view_hub()
             if path == "/api/gate-out":
                 return self.gate_out()
+            if path == "/api/settings/tracking-from":
+                return self.set_tracking_from()
             m = re.match(r"^/api/shipments/(\d+)/undo-gate-out$", path)
             if m:
                 return self.undo_gate_out(int(m.group(1)))
@@ -1873,6 +1890,89 @@ class Handler(BaseHTTPRequestHandler):
         rows = conn.execute(SHIPMENT_LIST_SQL + where_sql + f" ORDER BY {order} DESC LIMIT 2000", tuple(params)).fetchall()
         conn.close()
         self.send_json(200, [shipment_list_dict(r) for r in rows])
+
+    def tracking_from(self):
+        conn = get_db()
+        row = conn.execute("SELECT value FROM settings WHERE key = 'dispatch_tracking_from'").fetchone()
+        conn.close()
+        return row["value"] if row else None
+
+    def set_tracking_from(self):
+        self.require_admin()
+        value = require_str(self.read_json_body(), "trackingFrom")
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            raise ApiError(400, "trackingFrom must be YYYY-MM-DD")
+        conn = get_db()
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('dispatch_tracking_from', %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            (value,),
+        )
+        conn.commit()
+        conn.close()
+        self.send_json(200, {"trackingFrom": value})
+
+    # Packed-but-not-dispatched and dispatched-but-not-delivered invoices
+    # from the tracking start date on, oldest first (the ones to chase).
+    def list_open_shipments(self):
+        since = self.tracking_from() or "1970-01-01"
+        hub_sql, params = self.hub_filter("s.hub_id")
+        conn = get_db()
+        rows = conn.execute(
+            SHIPMENT_LIST_SQL + "WHERE s.delivered_at IS NULL AND s.ship_date >= %s" + hub_sql +
+            " ORDER BY COALESCE(s.dispatched_at, s.created_at) ASC LIMIT 5000",
+            (since, *params),
+        ).fetchall()
+        conn.close()
+        self.send_json(200, {"trackingFrom": since, "rows": [shipment_list_dict(r) for r in rows]})
+
+    # Delivered in the app, but the daily data still has no RTV Delivered At
+    # for at least one of the invoice's returns: the store must mark those in
+    # the source system. A return drops off once the dump shows it delivered.
+    def list_to_mark_delivered(self):
+        hub_sql, params = self.hub_filter("s.hub_id")
+        conn = get_db()
+        items = conn.execute(
+            """
+            SELECT s.id AS shipment_id, si.tracking_id, si.sku, si.box_no,
+                   r.return_tracking_id IS NOT NULL AS in_data,
+                   r.rtv_delivered_at, r.rtv_shipment_status, r.return_status
+            FROM shipments s
+            JOIN shipment_items si ON si.shipment_id = s.id
+            LEFT JOIN LATERAL (
+                SELECT * FROM returns r
+                WHERE r.return_tracking_id = si.tracking_id AND (si.sku IS NULL OR r.sku = si.sku)
+                ORDER BY r.rtv_delivered_at NULLS FIRST LIMIT 1
+            ) r ON TRUE
+            WHERE s.delivered_at IS NOT NULL
+            """ + hub_sql + " ORDER BY s.id, si.box_no, si.tracking_id",
+            tuple(params),
+        ).fetchall()
+        pending = {}
+        for it in items:
+            delivered_in_data = bool(it["rtv_delivered_at"]) or "deliver" in (it["rtv_shipment_status"] or "").lower()
+            if delivered_in_data:
+                continue
+            pending.setdefault(it["shipment_id"], []).append({
+                "trackingId": it["tracking_id"], "sku": it["sku"], "boxNo": it["box_no"],
+                "inData": it["in_data"], "dataStatus": it["rtv_shipment_status"] or it["return_status"],
+            })
+        out = []
+        if pending:
+            placeholders = ",".join(["%s"] * len(pending))
+            rows = conn.execute(
+                SHIPMENT_LIST_SQL + f"WHERE s.id IN ({placeholders}) ORDER BY s.delivered_at ASC",
+                tuple(pending.keys()),
+            ).fetchall()
+            for r in rows:
+                d = shipment_list_dict(r)
+                d["pendingItems"] = pending[r["id"]]
+                d["notInData"] = sum(1 for x in pending[r["id"]] if not x["inData"])
+                out.append(d)
+        conn.close()
+        self.send_json(200, out)
 
     def find_scoped_shipment(self, conn, shipment_id=None, invoice_no=None):
         if invoice_no is not None:

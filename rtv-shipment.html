@@ -180,6 +180,14 @@ body:not(.is-admin) .admin-only { display: none !important; }
 .pill.status-Dispatched { color: var(--warn); }
 .pill.status-Delivered { color: var(--good); }
 .deliver-row td { background: var(--zebra); }
+.filter-bar { display: grid; grid-template-columns: 2fr repeat(3, 1fr) 1fr 1fr auto; gap: 10px; align-items: end; margin-bottom: 12px; }
+.filter-bar .field label { font-size: 10.5px; }
+@media (max-width: 1100px) { .filter-bar { grid-template-columns: 1fr 1fr 1fr; } }
+.stat-row { display: flex; gap: 18px; flex-wrap: wrap; margin: 0 0 12px; font-size: 13px; }
+.stat-row b { font-size: 18px; font-weight: 800; margin-right: 4px; }
+.age-warn { color: var(--warn); font-weight: 700; }
+.age-bad { color: var(--bad); font-weight: 700; }
+.id-list { font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.7; }
 .deliver-form { display: grid; grid-template-columns: 160px 1fr 1fr auto; gap: 10px; align-items: end; }
 .deliver-form .field label { font-size: 11px; }
 @media (max-width: 820px) { .deliver-form { grid-template-columns: 1fr; } }
@@ -311,6 +319,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <button type="button" id="tabPackShipments" aria-selected="true">Pack shipments</button>
     <button type="button" id="tabGateOut" aria-selected="false">Gate-out</button>
     <button type="button" id="tabDelivered" aria-selected="false">Mark delivered</button>
+    <button type="button" id="tabOpenShipments" aria-selected="false">Open shipments</button>
+    <button type="button" id="tabToMarkDelivered" aria-selected="false">To be marked delivered</button>
     <button type="button" id="tabShipmentArchive" aria-selected="false">Shipment archive</button>
     <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings</button>
     <div class="side-nav-label admin-only">Admin</div>
@@ -605,6 +615,59 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <h2>Delivered in the last 7 days</h2>
     <div class="table-wrap">
       <table class="data-table"><thead><tr><th>Invoice No.</th><th>Brand</th><th>Delivered on</th><th>By</th><th>Proof of delivery</th></tr></thead><tbody id="deliveredRecentBody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<div class="app-shell" id="openShipmentsView" style="display:none; max-width: 1240px;">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · follow-up</p>
+      <h1>Open shipments</h1>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Packed or dispatched, not yet delivered</h2>
+    <p class="hint" id="openHint"></p>
+    <div class="admin-only" style="display:flex; gap:8px; align-items:end; margin-bottom:12px;">
+      <div class="field"><label for="trackingFromInput">Tracking from (ship date)</label><input type="date" id="trackingFromInput"></div>
+      <button type="button" class="btn small secondary" id="trackingFromSave">Save</button>
+    </div>
+    <div class="stat-row" id="openStats"></div>
+    <div class="filter-bar">
+      <div class="field"><label for="osSearch">Search</label><input id="osSearch" placeholder="Invoice or brand…" autocomplete="off"></div>
+      <div class="field"><label for="osStatus">Status</label><select id="osStatus"><option value="">All open</option><option value="Packed">Waiting for gate-out</option><option value="Dispatched">Waiting for delivery</option></select></div>
+      <div class="field"><label for="osLoc">Return location</label><select id="osLoc"><option value="">All</option><option value="Local">Local</option><option value="Non-Local">Non-Local</option></select></div>
+      <div class="field"><label for="osAge">Waiting</label><select id="osAge"><option value="0">Any time</option><option value="1">1 day or more</option><option value="2">2 days or more</option><option value="3">3 days or more</option></select></div>
+      <div class="field"><label for="osFrom">Ship date from</label><input type="date" id="osFrom"></div>
+      <div class="field"><label for="osTo">to</label><input type="date" id="osTo"></div>
+      <button type="button" class="btn small secondary" id="osCsv">Download CSV</button>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>Invoice No.</th><th>Ship date</th><th>Hub</th><th>Brand</th><th>Return location</th><th>Boxes</th><th>Units</th><th>Amount</th><th>Status</th><th>Waiting</th></tr></thead><tbody id="osBody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<div class="app-shell" id="toMarkDeliveredView" style="display:none; max-width: 1240px;">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · follow-up</p>
+      <h1>To be marked delivered</h1>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Delivered here, not yet in the daily data</h2>
+    <p class="hint">These invoices are marked delivered in this app, but the latest daily upload still has no <b>RTV Delivered At</b> for the returns listed. Mark those returns delivered in the source system — each one drops off this list after the next daily upload shows it delivered.</p>
+    <div class="stat-row" id="tmdStats"></div>
+    <div class="filter-bar" style="grid-template-columns: 2fr 1fr 1fr auto;">
+      <div class="field"><label for="tmdSearch">Search</label><input id="tmdSearch" placeholder="Invoice, brand or return ID…" autocomplete="off"></div>
+      <div class="field"><label for="tmdFrom">Delivered from</label><input type="date" id="tmdFrom"></div>
+      <div class="field"><label for="tmdTo">to</label><input type="date" id="tmdTo"></div>
+      <button type="button" class="btn small secondary" id="tmdCsv">Download CSV</button>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>Invoice No.</th><th>Hub</th><th>Brand</th><th>Delivered on</th><th>Returns to mark</th><th>Waiting</th><th></th></tr></thead><tbody id="tmdBody"></tbody></table>
     </div>
   </div>
 </div>
@@ -2830,6 +2893,10 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     document.getElementById("tabGateOut").setAttribute("aria-selected", "false");
     document.getElementById("deliveredView").style.display = "none";
     document.getElementById("tabDelivered").setAttribute("aria-selected", "false");
+    document.getElementById("openShipmentsView").style.display = "none";
+    document.getElementById("tabOpenShipments").setAttribute("aria-selected", "false");
+    document.getElementById("toMarkDeliveredView").style.display = "none";
+    document.getElementById("tabToMarkDelivered").setAttribute("aria-selected", "false");
     document.getElementById("tabPackShipments").setAttribute("aria-selected", "false");
     document.getElementById("tabShipmentArchive").setAttribute("aria-selected", "false");
     document.getElementById("tabCourierBookings").setAttribute("aria-selected", "false");
@@ -3148,6 +3215,175 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     });
     tr.after(row);
   }
+
+  // ================= open shipments =================
+  var openRows = [];
+  function waitingSince(s) { return s.status === "Dispatched" ? s.dispatchedAt : s.createdAt; }
+  function waitingDays(iso) { return (Date.now() - new Date(iso).getTime()) / 86400000; }
+  function waitingCell(iso) {
+    var d = waitingDays(iso);
+    var cls = d >= 3 ? "age-bad" : d >= 1 ? "age-warn" : "";
+    return "<span class='" + cls + "'>" + escapeHtml(timeAgo(iso).replace(" ago", "")) + "</span>";
+  }
+
+  function showOpenShipmentsView() {
+    currentTabShow = showOpenShipmentsView;
+    hideAllTabViews();
+    document.getElementById("openShipmentsView").style.display = "block";
+    document.getElementById("tabOpenShipments").setAttribute("aria-selected", "true");
+    loadOpenShipments();
+  }
+  document.getElementById("tabOpenShipments").addEventListener("click", showOpenShipmentsView);
+
+  function loadOpenShipments() {
+    return getJson("/api/shipments/open").then(function (res) {
+      openRows = res.rows;
+      document.getElementById("trackingFromInput").value = res.trackingFrom || "";
+      document.getElementById("openHint").textContent = "Invoices packed from " + formatDate(res.trackingFrom) +
+        " on. Waiting is time since packing (for gate-out) or since dispatch (for delivery); amber is a day or more, red three days or more.";
+      renderOpenShipments();
+    }).catch(function (err) { toast("Couldn't load open shipments: " + err.message, true); });
+  }
+
+  function filteredOpen() {
+    var q = document.getElementById("osSearch").value.trim().toLowerCase();
+    var st = document.getElementById("osStatus").value;
+    var loc = document.getElementById("osLoc").value;
+    var age = Number(document.getElementById("osAge").value);
+    var from = document.getElementById("osFrom").value, to = document.getElementById("osTo").value;
+    return openRows.filter(function (s) {
+      if (st && s.status !== st) return false;
+      if (loc && s.returnLocation !== loc) return false;
+      if (age && waitingDays(waitingSince(s)) < age) return false;
+      if (from && s.shipDate < from) return false;
+      if (to && s.shipDate > to) return false;
+      return !q || s.invoiceNo.toLowerCase().indexOf(q) !== -1 || brandLabel(s).toLowerCase().indexOf(q) !== -1;
+    });
+  }
+
+  function renderOpenShipments() {
+    var rows = filteredOpen();
+    var packed = openRows.filter(function (s) { return s.status === "Packed"; }).length;
+    document.getElementById("openStats").innerHTML =
+      "<span><b>" + packed + "</b>waiting for gate-out</span><span><b>" + (openRows.length - packed) + "</b>waiting for delivery</span>" +
+      "<span><b>" + openRows.filter(function (s) { return waitingDays(waitingSince(s)) >= 3; }).length + "</b>waiting 3 days or more</span>";
+    var body = document.getElementById("osBody");
+    body.innerHTML = "";
+    rows.forEach(function (s) {
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td class='mono'>" + escapeHtml(s.invoiceNo) + "</td><td>" + escapeHtml(formatDate(s.shipDate)) + "</td><td>" + escapeHtml(s.hubName) + "</td>" +
+        "<td>" + escapeHtml(brandLabel(s)) + "</td><td>" + escapeHtml(s.returnLocation || "Not set") + "</td><td>" + s.boxes + "</td><td>" + s.units + "</td>" +
+        "<td class='mono'>" + formatMoney(s.amount) + "</td><td>" + statusCell(s) + "</td><td>" + waitingCell(waitingSince(s)) + "</td>";
+      body.appendChild(tr);
+    });
+    if (!rows.length) body.innerHTML = "<tr><td colspan='10' class='empty-state'>" + (openRows.length ? "Nothing matches these filters." : "Every invoice is delivered.") + "</td></tr>";
+  }
+  ["osSearch", "osStatus", "osLoc", "osAge", "osFrom", "osTo"].forEach(function (id) {
+    document.getElementById(id).addEventListener(id === "osSearch" ? "input" : "change", renderOpenShipments);
+  });
+  document.getElementById("osCsv").addEventListener("click", function () {
+    downloadCsv("rtv-open-shipments-" + istToday() + ".csv",
+      ["Invoice No.", "Ship date", "Hub", "Brand", "Return location", "Boxes", "Units", "Amount", "Status", "Waiting since", "Days waiting", "Dispatched by"],
+      filteredOpen().map(function (s) {
+        return [s.invoiceNo, s.shipDate, s.hubName, brandLabel(s), s.returnLocation || "Not set", s.boxes, s.units, Number(s.amount || 0).toFixed(2),
+          s.status === "Packed" ? "Waiting for gate-out" : "Waiting for delivery", waitingSince(s), waitingDays(waitingSince(s)).toFixed(1), s.dispatchedBy || ""];
+      }));
+  });
+  document.getElementById("trackingFromSave").addEventListener("click", function () {
+    var v = document.getElementById("trackingFromInput").value;
+    if (!v) { toast("Pick a date", true); return; }
+    postJson("/api/settings/tracking-from", { trackingFrom: v })
+      .then(function () { toast("Tracking from " + formatDate(v)); return loadOpenShipments(); })
+      .catch(function (err) { toast(err.message, true); });
+  });
+
+  // ================= to be marked delivered =================
+  var tmdRows = [];
+  function showToMarkDeliveredView() {
+    currentTabShow = showToMarkDeliveredView;
+    hideAllTabViews();
+    document.getElementById("toMarkDeliveredView").style.display = "block";
+    document.getElementById("tabToMarkDelivered").setAttribute("aria-selected", "true");
+    loadToMarkDelivered();
+  }
+  document.getElementById("tabToMarkDelivered").addEventListener("click", showToMarkDeliveredView);
+
+  function loadToMarkDelivered() {
+    return getJson("/api/shipments/to-mark-delivered").then(function (rows) { tmdRows = rows; renderToMarkDelivered(); })
+      .catch(function (err) { toast("Couldn't load the list: " + err.message, true); });
+  }
+
+  function filteredTmd() {
+    var q = document.getElementById("tmdSearch").value.trim().toLowerCase();
+    var from = document.getElementById("tmdFrom").value, to = document.getElementById("tmdTo").value;
+    return tmdRows.filter(function (s) {
+      if (from && s.deliveredOn < from) return false;
+      if (to && s.deliveredOn > to) return false;
+      if (!q) return true;
+      return s.invoiceNo.toLowerCase().indexOf(q) !== -1 || brandLabel(s).toLowerCase().indexOf(q) !== -1 ||
+        s.pendingItems.some(function (it) { return it.trackingId.toLowerCase().indexOf(q) !== -1; });
+    });
+  }
+
+  function renderToMarkDelivered() {
+    var rows = filteredTmd();
+    var ids = tmdRows.reduce(function (n, s) { return n + new Set(s.pendingItems.map(function (it) { return it.trackingId; })).size; }, 0);
+    document.getElementById("tmdStats").innerHTML = "<span><b>" + tmdRows.length + "</b>invoices</span><span><b>" + ids + "</b>returns to mark delivered</span>";
+    var body = document.getElementById("tmdBody");
+    body.innerHTML = "";
+    rows.forEach(function (s) {
+      var uniqueIds = Array.from(new Set(s.pendingItems.map(function (it) { return it.trackingId; })));
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td class='mono'>" + escapeHtml(s.invoiceNo) + "</td><td>" + escapeHtml(s.hubName) + "</td><td>" + escapeHtml(brandLabel(s)) + "</td>" +
+        "<td>" + escapeHtml(formatDate(s.deliveredOn)) + "</td><td>" + uniqueIds.length + " return" + (uniqueIds.length === 1 ? "" : "s") + (s.notInData ? " <span class='hint' style='margin:0;'>(" + s.notInData + " not in daily data)</span>" : "") + "</td>" +
+        "<td>" + waitingCell(s.deliveredAt) + "</td><td style='white-space:nowrap;'></td>";
+      var show = document.createElement("button");
+      show.type = "button";
+      show.className = "link-btn";
+      show.textContent = "Show IDs";
+      show.addEventListener("click", function () {
+        var next = tr.nextElementSibling;
+        if (next && next.classList.contains("deliver-row")) { next.remove(); show.textContent = "Show IDs"; return; }
+        var row = document.createElement("tr");
+        row.className = "deliver-row";
+        row.innerHTML = "<td colspan='7'><div class='id-list'>" + s.pendingItems.map(function (it) {
+          return escapeHtml(it.trackingId) + (it.sku ? " · SKU " + escapeHtml(it.sku) : "") + " · box " + it.boxNo + " · " +
+            (it.inData ? "in data: " + escapeHtml(it.dataStatus || "no RTV delivered date") : "not in the daily data");
+        }).join("<br>") + "</div></td>";
+        tr.after(row);
+        show.textContent = "Hide IDs";
+      });
+      var copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "link-btn";
+      copy.style.marginLeft = "12px";
+      copy.textContent = "Copy IDs";
+      copy.addEventListener("click", function () {
+        var text = uniqueIds.join("\n");
+        (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+          .then(function () { toast(uniqueIds.length + " return IDs copied"); })
+          .catch(function () { window.prompt("Copy these return IDs:", uniqueIds.join(" ")); });
+      });
+      tr.lastElementChild.appendChild(show);
+      tr.lastElementChild.appendChild(copy);
+      body.appendChild(tr);
+    });
+    if (!rows.length) body.innerHTML = "<tr><td colspan='7' class='empty-state'>" + (tmdRows.length ? "Nothing matches these filters." : "Nothing to mark — the daily data agrees with every delivery here.") + "</td></tr>";
+  }
+  ["tmdSearch", "tmdFrom", "tmdTo"].forEach(function (id) {
+    document.getElementById(id).addEventListener(id === "tmdSearch" ? "input" : "change", renderToMarkDelivered);
+  });
+  document.getElementById("tmdCsv").addEventListener("click", function () {
+    var out = [];
+    filteredTmd().forEach(function (s) {
+      s.pendingItems.forEach(function (it) {
+        out.push([s.invoiceNo, s.hubName, brandLabel(s), s.deliveredOn, it.trackingId, it.sku || "", it.boxNo,
+          it.inData ? "In daily data, not delivered" : "Not in daily data", it.dataStatus || ""]);
+      });
+    });
+    downloadCsv("rtv-to-mark-delivered-" + istToday() + ".csv",
+      ["Invoice No.", "Hub", "Brand", "Delivered on (app)", "Return Tracking ID", "SKU", "Box", "Daily data", "Status in data"], out);
+  });
 
   // ================= brands (admin): return location =================
   function showBrandsView() {
