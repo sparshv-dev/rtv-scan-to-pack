@@ -10,8 +10,6 @@ Hosted (Render): reads DATABASE_URL and PORT from the environment.
 First admin:  python rtv-shipment-server.py create-admin <username>
 """
 import csv
-import email.parser
-import email.policy
 import getpass
 import hashlib
 import io
@@ -595,7 +593,7 @@ def parse_number(v):
 
 def xlsx_rows(data):
     """First worksheet of an .xlsx as lists of strings — stdlib only, so the
-    Google Form can take a spreadsheet as well as a CSV."""
+    upload can be a spreadsheet as well as a CSV."""
     ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         shared = []
@@ -1045,7 +1043,7 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path
         try:
             if path == "/api/dump/upload":
-                return self.upload_dump()  # own auth: admin session or Zapier key
+                return self.upload_dump()  # reads the file before checking sign-in, see upload_dump
             if path == "/api/login":
                 return self.login()
             if path == "/api/logout":
@@ -1059,8 +1057,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.create_hub()
             if path == "/api/vendors":
                 return self.create_vendor()
-            if path == "/api/dump/api-key":
-                return self.rotate_dump_api_key()
             if path == "/api/shipments":
                 return self.create_shipment()
             if path == "/api/email-template":
@@ -1419,54 +1415,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(200, {"kind": "legacy", "trackingId": tracking_id,
                              "items": [{"sku": None, "value": row["value"], "brand": row["seller_name"]}]})
 
-    def dump_api_key_ok(self):
-        supplied = (self.headers.get("X-Api-Key") or "").strip()
-        auth = self.headers.get("Authorization") or ""
-        if not supplied and auth.lower().startswith("bearer "):
-            supplied = auth[7:].strip()
-        if not supplied:
-            return False
-        conn = get_db()
-        row = conn.execute("SELECT value FROM settings WHERE key = 'dump_api_key_hash'").fetchone()
-        conn.close()
-        return bool(row) and hmac.compare_digest(row["value"], hash_token(supplied))
-
     def read_upload(self):
-        """The uploaded file's bytes and name, whether it came as a raw body
-        (the app's own upload button) or multipart form data (Zapier)."""
+        """The uploaded file's bytes (sent as the raw request body) and its name."""
         length = int(self.headers.get("Content-Length", 0) or 0)
         if length <= 0:
             raise ApiError(400, "No file received")
         if length > MAX_UPLOAD_BYTES:
             raise ApiError(413, "File is too large (max 60 MB)")
-        body = self.rfile.read(length)
-        ctype = self.headers.get("Content-Type") or ""
-        filename = self.headers.get("X-Filename") or ""
-        if ctype.lower().startswith("multipart/form-data"):
-            msg = email.parser.BytesParser(policy=email.policy.HTTP).parsebytes(
-                b"Content-Type: " + ctype.encode("latin-1") + b"\r\n\r\n" + body
-            )
-            parts = [p for p in msg.iter_parts()] if msg.is_multipart() else []
-            files = [p for p in parts if p.get_filename()] or parts
-            if not files:
-                raise ApiError(400, "No file found in the upload")
-            part = files[0]
-            return part.get_payload(decode=True) or b"", part.get_filename() or filename
-        return body, filename
+        return self.rfile.read(length), self.headers.get("X-Filename") or ""
 
     def upload_dump(self):
         # Read the body before any auth answer, so a refused client gets the
         # error message instead of a connection reset mid-upload.
         data, filename = self.read_upload()
-        user = self.current_user()
-        if user and user["role"] == "admin":
-            source, uploaded_by = "manual", user["username"]
-        elif self.dump_api_key_ok():
-            source, uploaded_by = "zapier", "Zapier"
-        elif user:
-            raise ApiError(403, "Only admins can do that")
-        else:
-            raise ApiError(401, "Sign in, or send the upload key in an X-Api-Key header")
+        user = self.require_admin()
+        source, uploaded_by = "manual", user["username"]
 
         records, stats = prepare_dump(file_rows(data, filename))
         if not records:
@@ -1555,14 +1518,12 @@ class Handler(BaseHTTPRequestHandler):
         self.require_admin()
         conn = get_db()
         rows = conn.execute("SELECT * FROM dump_imports ORDER BY id DESC LIMIT 50").fetchall()
-        key = conn.execute("SELECT 1 FROM settings WHERE key = 'dump_api_key_hash'").fetchone()
         total = conn.execute("SELECT COUNT(*) AS n FROM returns").fetchone()["n"]
         no_hub = conn.execute(
             "SELECT hub_name, COUNT(*) AS n FROM returns WHERE hub_id IS NULL GROUP BY hub_name ORDER BY 2 DESC"
         ).fetchall()
         conn.close()
         self.send_json(200, {
-            "hasApiKey": bool(key),
             "totalReturns": total,
             "returnsWithoutHub": [{"hubName": r["hub_name"], "count": r["n"]} for r in no_hub],
             "imports": [
@@ -1576,20 +1537,6 @@ class Handler(BaseHTTPRequestHandler):
                 for r in rows
             ],
         })
-
-    def rotate_dump_api_key(self):
-        self.require_admin()
-        key = "rtvk_" + secrets.token_urlsafe(24)
-        conn = get_db()
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES ('dump_api_key_hash', %s) "
-            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-            (hash_token(key),),
-        )
-        conn.commit()
-        conn.close()
-        # Shown once — only the hash is stored.
-        self.send_json(200, {"apiKey": key})
 
     def update_hub(self, hub_id):
         self.require_admin()

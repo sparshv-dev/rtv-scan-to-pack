@@ -545,22 +545,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <h2>Import history</h2>
     <p class="hint" id="dumpTotals"></p>
     <div class="table-wrap">
-      <table class="data-table"><thead><tr><th>When</th><th>From</th><th>File</th><th>Rows</th><th>New</th><th>Updated</th><th>Unchanged</th><th>Older, skipped</th><th>Repeats</th><th>Blank</th><th>Hubs not matched</th></tr></thead><tbody id="dumpHistoryBody"></tbody></table>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Automatic upload (Zapier)</h2>
-    <p class="hint">Zapier sends each file from the Google Form's upload folder here. It needs the upload address and the key below. The key is shown once; generating a new one stops the old one working.</p>
-    <div class="field-grid">
-      <div class="field span-2"><label>Upload address</label><input id="dumpUploadUrl" readonly class="mono"></div>
-      <div class="field span-2"><label>Key</label>
-        <div class="row-inline">
-          <input id="dumpApiKey" readonly class="mono" placeholder="">
-          <button type="button" class="btn small secondary" id="dumpCopyKey" style="display:none;">Copy</button>
-          <button type="button" class="btn small" id="dumpNewKey">Generate key</button>
-        </div>
-      </div>
+      <table class="data-table"><thead><tr><th>When</th><th>By</th><th>File</th><th>Rows</th><th>New</th><th>Updated</th><th>Unchanged</th><th>Older, skipped</th><th>Repeats</th><th>Blank</th><th>Hubs not matched</th></tr></thead><tbody id="dumpHistoryBody"></tbody></table>
     </div>
   </div>
 
@@ -2607,7 +2592,6 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     hideAllTabViews();
     document.getElementById("dailyDataView").style.display = "block";
     document.getElementById("tabDailyData").setAttribute("aria-selected", "true");
-    document.getElementById("dumpUploadUrl").value = location.origin + "/api/dump/upload";
     loadDumpInfo();
   }
   document.getElementById("tabDailyData").addEventListener("click", showDailyDataView);
@@ -2617,16 +2601,13 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   function loadDumpInfo() {
     return getJson("/api/dump/imports").then(function (info) {
       document.getElementById("dumpTotals").textContent = num(info.totalReturns) + " return items in the database.";
-      var keyInput = document.getElementById("dumpApiKey");
-      if (!keyInput.dataset.fresh) keyInput.placeholder = info.hasApiKey ? "A key is set (hidden). Generate a new one if you've lost it." : "No key yet — generate one for Zapier";
-      document.getElementById("dumpNewKey").textContent = info.hasApiKey ? "Generate new key" : "Generate key";
 
       var body = document.getElementById("dumpHistoryBody");
       body.innerHTML = "";
       info.imports.forEach(function (r) {
         var tr = document.createElement("tr");
         tr.innerHTML = "<td>" + escapeHtml(formatDateTime(r.createdAt)) + "</td>" +
-          "<td>" + escapeHtml(r.source === "zapier" ? "Zapier" : r.uploadedBy) + "</td>" +
+          "<td>" + escapeHtml(r.uploadedBy) + "</td>" +
           "<td>" + escapeHtml(r.filename || "—") + "</td>" +
           "<td class='mono'>" + num(r.totalRows) + "</td><td class='mono'>" + num(r.inserted) + "</td>" +
           "<td class='mono'>" + num(r.updated) + "</td><td class='mono'>" + num(r.unchanged) + "</td>" +
@@ -2683,26 +2664,6 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       .catch(function (err) { out.innerHTML = ""; errEl.textContent = "Import failed: " + err.message; e.target.value = ""; });
   });
 
-  document.getElementById("dumpNewKey").addEventListener("click", function () {
-    if (this.textContent.indexOf("new") !== -1 && !window.confirm("Generate a new key? The current one stops working, so the Zap must be updated with the new key.")) return;
-    postJson("/api/dump/api-key", {})
-      .then(function (r) {
-        var input = document.getElementById("dumpApiKey");
-        input.value = r.apiKey;
-        input.dataset.fresh = "1";
-        document.getElementById("dumpCopyKey").style.display = "";
-        toast("New key generated — copy it into Zapier now; it won't be shown again");
-        return loadDumpInfo();
-      })
-      .catch(function (err) { toast(err.message, true); });
-  });
-  document.getElementById("dumpCopyKey").addEventListener("click", function () {
-    var input = document.getElementById("dumpApiKey");
-    input.select();
-    (navigator.clipboard ? navigator.clipboard.writeText(input.value) : Promise.reject())
-      .then(function () { toast("Key copied"); })
-      .catch(function () { document.execCommand("copy"); toast("Key copied"); });
-  });
 
   // ================= hub accounts (admin) =================
   var accounts = [];
