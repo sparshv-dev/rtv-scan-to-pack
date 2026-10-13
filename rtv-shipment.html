@@ -180,10 +180,14 @@ body:not(.is-admin) .admin-only { display: none !important; }
 .pill.status-Dispatched { color: var(--warn); }
 .pill.status-Delivered { color: var(--good); }
 .deliver-row td { background: var(--zebra); }
-.filter-bar { display: grid; grid-template-columns: 2fr repeat(3, 1fr) 1fr 1fr auto; gap: 10px; align-items: end; margin-bottom: 12px; }
+.table-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.table-toolbar .actions { display: flex; align-items: center; gap: 14px; margin-left: auto; }
+.filter-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px 12px; align-items: end; padding: 12px 14px; margin-bottom: 14px; background: var(--zebra); border: 1px solid var(--line); border-radius: 10px; }
+.filter-bar .field.wide { grid-column: span 2; }
 .filter-bar .field label { font-size: 10.5px; }
-@media (max-width: 1100px) { .filter-bar { grid-template-columns: 1fr 1fr 1fr; } }
-.stat-row { display: flex; gap: 18px; flex-wrap: wrap; margin: 0 0 12px; font-size: 13px; }
+.filter-bar .field input, .filter-bar .field select { background: var(--paper-raised); }
+@media (max-width: 640px) { .filter-bar .field.wide { grid-column: 1 / -1; } }
+.stat-row { display: flex; gap: 18px; flex-wrap: wrap; margin: 0; font-size: 13px; }
 .stat-row b { font-size: 18px; font-weight: 800; margin-right: 4px; }
 .age-warn { color: var(--warn); font-weight: 700; }
 .age-bad { color: var(--bad); font-weight: 700; }
@@ -633,15 +637,20 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <div class="field"><label for="trackingFromInput">Tracking from (ship date)</label><input type="date" id="trackingFromInput"></div>
       <button type="button" class="btn small secondary" id="trackingFromSave">Save</button>
     </div>
-    <div class="stat-row" id="openStats"></div>
+    <div class="table-toolbar">
+      <div class="stat-row" id="openStats"></div>
+      <div class="actions">
+        <button type="button" class="link-btn" id="osClear">Clear filters</button>
+        <button type="button" class="btn small secondary" id="osCsv">Download CSV</button>
+      </div>
+    </div>
     <div class="filter-bar">
       <div class="field"><label for="osSearch">Search</label><input id="osSearch" placeholder="Invoice or brand…" autocomplete="off"></div>
       <div class="field"><label for="osStatus">Status</label><select id="osStatus"><option value="">All open</option><option value="Packed">Waiting for gate-out</option><option value="Dispatched">Waiting for delivery</option></select></div>
       <div class="field"><label for="osLoc">Return location</label><select id="osLoc"><option value="">All</option><option value="Local">Local</option><option value="Non-Local">Non-Local</option></select></div>
       <div class="field"><label for="osAge">Waiting</label><select id="osAge"><option value="0">Any time</option><option value="1">1 day or more</option><option value="2">2 days or more</option><option value="3">3 days or more</option></select></div>
       <div class="field"><label for="osFrom">Ship date from</label><input type="date" id="osFrom"></div>
-      <div class="field"><label for="osTo">to</label><input type="date" id="osTo"></div>
-      <button type="button" class="btn small secondary" id="osCsv">Download CSV</button>
+      <div class="field"><label for="osTo">Ship date to</label><input type="date" id="osTo"></div>
     </div>
     <div class="table-wrap">
       <table class="data-table"><thead><tr><th>Invoice No.</th><th>Ship date</th><th>Hub</th><th>Brand</th><th>Return location</th><th>Boxes</th><th>Units</th><th>Amount</th><th>Status</th><th>Waiting</th></tr></thead><tbody id="osBody"></tbody></table>
@@ -659,12 +668,17 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   <div class="card">
     <h2>Delivered here, not yet in the daily data</h2>
     <p class="hint">These invoices are marked delivered in this app, but the latest daily upload still has no <b>RTV Delivered At</b> for the returns listed. Mark those returns delivered in the source system — each one drops off this list after the next daily upload shows it delivered.</p>
-    <div class="stat-row" id="tmdStats"></div>
-    <div class="filter-bar" style="grid-template-columns: 2fr 1fr 1fr auto;">
-      <div class="field"><label for="tmdSearch">Search</label><input id="tmdSearch" placeholder="Invoice, brand or return ID…" autocomplete="off"></div>
+    <div class="table-toolbar">
+      <div class="stat-row" id="tmdStats"></div>
+      <div class="actions">
+        <button type="button" class="link-btn" id="tmdClear">Clear filters</button>
+        <button type="button" class="btn small secondary" id="tmdCsv">Download CSV</button>
+      </div>
+    </div>
+    <div class="filter-bar">
+      <div class="field wide"><label for="tmdSearch">Search</label><input id="tmdSearch" placeholder="Invoice, brand or return ID…" autocomplete="off"></div>
       <div class="field"><label for="tmdFrom">Delivered from</label><input type="date" id="tmdFrom"></div>
-      <div class="field"><label for="tmdTo">to</label><input type="date" id="tmdTo"></div>
-      <button type="button" class="btn small secondary" id="tmdCsv">Download CSV</button>
+      <div class="field"><label for="tmdTo">Delivered to</label><input type="date" id="tmdTo"></div>
     </div>
     <div class="table-wrap">
       <table class="data-table"><thead><tr><th>Invoice No.</th><th>Hub</th><th>Brand</th><th>Delivered on</th><th>Returns to mark</th><th>Waiting</th><th></th></tr></thead><tbody id="tmdBody"></tbody></table>
@@ -716,14 +730,19 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   <div class="card">
     <h2>Return location</h2>
     <p class="hint"><b>Local</b> = delivered in Mumbai — a proof-of-delivery photo is required when it's marked delivered. <b>Non-Local</b> = outside Mumbai — the photo is optional. Filled in automatically from the seller list; change any brand here.</p>
-    <div class="field-grid" style="grid-template-columns: 2fr 1fr auto; align-items:end; margin-bottom:14px;">
-      <div class="field"><label for="brandsSearch">Search</label><input id="brandsSearch" placeholder="Brand, store or company…" autocomplete="off"></div>
+    <div class="table-toolbar">
+      <div class="stat-row" id="brandsCount"></div>
+      <div class="actions">
+        <button type="button" class="link-btn" id="brandsClear">Clear filters</button>
+        <button type="button" class="btn small secondary" id="brandsCsvBtn">Download CSV</button>
+      </div>
+    </div>
+    <div class="filter-bar">
+      <div class="field wide"><label for="brandsSearch">Search</label><input id="brandsSearch" placeholder="Brand, store or company…" autocomplete="off"></div>
       <div class="field"><label for="brandsLocFilter">Return location</label>
         <select id="brandsLocFilter"><option value="">All</option><option value="Local">Local</option><option value="Non-Local">Non-Local</option><option value="none">Not set</option><option value="removed">Removed</option></select>
       </div>
-      <button type="button" class="btn small secondary" id="brandsCsvBtn">Download CSV</button>
     </div>
-    <p class="hint" id="brandsCount" style="margin:-4px 0 10px;"></p>
     <div class="table-wrap">
       <table class="data-table"><thead><tr><th>Brand / store</th><th>Company</th><th>Pincode</th><th>Return location</th><th></th></tr></thead><tbody id="brandsBody"></tbody></table>
     </div>
@@ -3281,6 +3300,16 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   ["osSearch", "osStatus", "osLoc", "osAge", "osFrom", "osTo"].forEach(function (id) {
     document.getElementById(id).addEventListener(id === "osSearch" ? "input" : "change", renderOpenShipments);
   });
+  function clearFilters(ids, render) {
+    ids.forEach(function (id) {
+      var el = document.getElementById(id);
+      el.value = el.tagName === "SELECT" ? el.options[0].value : "";
+    });
+    render();
+  }
+  document.getElementById("osClear").addEventListener("click", function () {
+    clearFilters(["osSearch", "osStatus", "osLoc", "osAge", "osFrom", "osTo"], renderOpenShipments);
+  });
   document.getElementById("osCsv").addEventListener("click", function () {
     downloadCsv("rtv-open-shipments-" + istToday() + ".csv",
       ["Invoice No.", "Ship date", "Hub", "Brand", "Return location", "Boxes", "Units", "Amount", "Status", "Waiting since", "Days waiting", "Dispatched by"],
@@ -3373,6 +3402,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   ["tmdSearch", "tmdFrom", "tmdTo"].forEach(function (id) {
     document.getElementById(id).addEventListener(id === "tmdSearch" ? "input" : "change", renderToMarkDelivered);
   });
+  document.getElementById("tmdClear").addEventListener("click", function () {
+    clearFilters(["tmdSearch", "tmdFrom", "tmdTo"], renderToMarkDelivered);
+  });
   document.getElementById("tmdCsv").addEventListener("click", function () {
     var out = [];
     filteredTmd().forEach(function (s) {
@@ -3412,8 +3444,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     var activeBrands = state.vendors.filter(function (v) { return v.active !== false; });
     var notSet = activeBrands.filter(function (v) { return !v.returnLocation; }).length;
     var removed = state.vendors.length - activeBrands.length;
-    document.getElementById("brandsCount").textContent = rows.length + " shown · " + activeBrands.length + " brands in use" +
-      (notSet ? " · " + notSet + " without a return location" : "") + (removed ? " · " + removed + " removed" : "");
+    document.getElementById("brandsCount").innerHTML = "<span><b>" + activeBrands.length + "</b>brands in use</span>" +
+      (notSet ? "<span><b>" + notSet + "</b>without a return location</span>" : "") +
+      (removed ? "<span><b>" + removed + "</b>removed</span>" : "") + "<span><b>" + rows.length + "</b>shown</span>";
     var body = document.getElementById("brandsBody");
     body.innerHTML = "";
     rows.forEach(function (v) {
@@ -3474,6 +3507,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
   }
+  document.getElementById("brandsClear").addEventListener("click", function () {
+    clearFilters(["brandsSearch", "brandsLocFilter"], renderBrands);
+  });
   document.getElementById("brandsCsvBtn").addEventListener("click", function () {
     downloadCsv("rtv-brands-return-location.csv", ["Brand / store", "Short name", "Company", "Pincode", "Return location"],
       filteredBrands().map(function (v) { return [v.name, v.shortName, v.warehouseLabel, v.pincode, v.returnLocation || "Not set"]; }));
