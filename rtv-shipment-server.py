@@ -477,6 +477,18 @@ def init_db():
             error TEXT
         );
         ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS sku TEXT;
+        -- Pendency's second terminal (the first is being packed in the app):
+        -- a return item closed by the team with a reason and remarks.
+        CREATE TABLE IF NOT EXISTS return_closures (
+            return_tracking_id TEXT NOT NULL,
+            sku TEXT NOT NULL DEFAULT '',
+            reason TEXT NOT NULL CHECK (reason IN ('Lost', 'Rider Miss', 'Store Miss')),
+            remarks TEXT NOT NULL,
+            hub_id INTEGER REFERENCES hubs(id) ON DELETE SET NULL,
+            closed_by TEXT NOT NULL,
+            closed_at TEXT NOT NULL,
+            PRIMARY KEY (return_tracking_id, sku)
+        );
         -- Gate-out and delivery are per invoice: one scan of the invoice
         -- barcode dispatches every box on it.
         ALTER TABLE shipments ADD COLUMN IF NOT EXISTS dispatched_at TEXT;
@@ -895,6 +907,7 @@ def courier_booking_to_dict(row):
 
 
 MAX_POD_BYTES = 12 * 1024 * 1024
+CLOSURE_REASONS = ("Lost", "Rider Miss", "Store Miss")
 
 
 def shipment_status(row):
@@ -1208,6 +1221,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.list_shipments()
             if path == "/api/pendency":
                 return self.list_pendency()
+            if path == "/api/pendency/closed":
+                return self.list_closed_returns()
             if path == "/api/shipments/open":
                 return self.list_open_shipments()
             if path == "/api/shipments/to-mark-delivered":
@@ -1268,6 +1283,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.set_view_hub()
             if path == "/api/gate-out":
                 return self.gate_out()
+            if path == "/api/pendency/close":
+                return self.close_returns()
+            if path == "/api/pendency/reopen":
+                return self.reopen_returns()
             if path == "/api/settings/tracking-from":
                 return self.set_tracking_from()
             m = re.match(r"^/api/shipments/(\d+)/undo-gate-out$", path)
@@ -1630,7 +1649,9 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(400, "tracking is required")
         conn = get_db()
         rows = conn.execute(
-            "SELECT r.*, h.name AS hub_display FROM returns r LEFT JOIN hubs h ON h.id = r.hub_id "
+            "SELECT r.*, h.name AS hub_display, c.reason AS closed_reason, c.closed_at, c.closed_by "
+            "FROM returns r LEFT JOIN hubs h ON h.id = r.hub_id "
+            "LEFT JOIN return_closures c ON c.return_tracking_id = r.return_tracking_id AND c.sku = r.sku "
             "WHERE r.return_tracking_id = %s ORDER BY r.sku",
             (tracking_id,),
         ).fetchall()
@@ -1644,6 +1665,7 @@ class Handler(BaseHTTPRequestHandler):
                         "sku": r["sku"], "value": float(r["sale_price"] or 0), "brand": r["seller_name"],
                         "returnType": r["return_type"], "returnStatus": r["return_status"],
                         "hubId": r["hub_id"], "hubName": r["hub_display"] or r["hub_name"],
+                        "closedReason": r["closed_reason"], "closedAt": r["closed_at"], "closedBy": r["closed_by"],
                     }
                     for r in rows
                 ],
@@ -1916,11 +1938,11 @@ class Handler(BaseHTTPRequestHandler):
         conn.close()
         self.send_json(200, {"trackingFrom": value})
 
-    # Returns in the daily data that are at the hub but not packed in the app
-    # yet. The clock starts at Return Created At for RTO / Home Trial returns
-    # and at Picked Up At for everything else (no pickup yet = not at the hub,
-    # so not pending). Returns the data already shows dispatched or RTV
-    # delivered are left out.
+    # Returns in the daily data that are at the hub and still open. A return
+    # leaves pendency only two ways: it's packed in the app, or the team closes
+    # it (Lost / Rider Miss / Store Miss). The clock starts at Return Created
+    # At for RTO / Home Trial returns and at Picked Up At for everything else
+    # (no pickup yet = not at the hub, so not pending).
     PENDENCY_SQL = """
         WITH r AS (
             SELECT r.*,
@@ -1929,7 +1951,10 @@ class Handler(BaseHTTPRequestHandler):
                    CASE WHEN r.return_type ILIKE 'rto%%' OR r.return_type ILIKE '%%home trial%%'
                         THEN 'Return Created At' ELSE 'Picked Up At' END AS clock_column
             FROM returns r
-            WHERE r.dispatched_at IS NULL AND r.rtv_delivered_at IS NULL
+            WHERE NOT EXISTS (
+                  SELECT 1 FROM return_closures c
+                  WHERE c.return_tracking_id = r.return_tracking_id AND c.sku = r.sku
+              )
               AND NOT EXISTS (
                   SELECT 1 FROM shipment_items si
                   WHERE si.tracking_id = r.return_tracking_id AND (si.sku IS NULL OR si.sku = r.sku)
@@ -1971,6 +1996,93 @@ class Handler(BaseHTTPRequestHandler):
             })
         items.sort(key=lambda x: -x["ageHours"])
         self.send_json(200, {"items": items, "notPickedUp": not_picked_up})
+
+    def _closure_items(self, body):
+        items = body.get("items")
+        if not isinstance(items, list) or not items:
+            raise ApiError(400, "Pick at least one return")
+        if len(items) > 2000:
+            raise ApiError(400, "Too many at once — close at most 2000 at a time")
+        out = []
+        for it in items:
+            rid = (it.get("returnId") or "").strip() if isinstance(it, dict) else ""
+            if not rid:
+                raise ApiError(400, "Each item needs a returnId")
+            out.append((rid, (it.get("sku") or "").strip()))
+        return list(dict.fromkeys(out))
+
+    def close_returns(self):
+        user = self.require_user()
+        body = self.read_json_body()
+        reason = (body.get("reason") or "").strip()
+        if reason not in CLOSURE_REASONS:
+            raise ApiError(400, "Reason must be Lost, Rider Miss or Store Miss")
+        remarks = (body.get("remarks") or "").strip()
+        if not remarks:
+            raise ApiError(400, "Write a remark saying what happened")
+        items = self._closure_items(body)
+        scoped = self.scope_hub_id()
+        conn = get_db()
+        placeholders = ",".join(["(%s, %s)"] * len(items))
+        found = conn.execute(
+            f"SELECT return_tracking_id, sku, hub_id FROM returns WHERE (return_tracking_id, sku) IN ({placeholders})",
+            tuple(v for pair in items for v in pair),
+        ).fetchall()
+        by_key = {(r["return_tracking_id"], r["sku"]): r for r in found}
+        missing = [f"{rid} {sku}".strip() for rid, sku in items if (rid, sku) not in by_key]
+        if missing:
+            conn.close()
+            raise ApiError(404, "Not in the daily data: " + ", ".join(missing[:5]) + ("…" if len(missing) > 5 else ""))
+        if scoped is not None and any(r["hub_id"] != scoped for r in found):
+            conn.close()
+            raise ApiError(403, "You can only close your own hub's returns")
+        now = datetime.now(timezone.utc).isoformat()
+        rows = [(rid, sku, reason, remarks[:1000], by_key[(rid, sku)]["hub_id"], user["username"], now) for rid, sku in items]
+        conn.execute_values(
+            "INSERT INTO return_closures (return_tracking_id, sku, reason, remarks, hub_id, closed_by, closed_at) VALUES %s "
+            "ON CONFLICT (return_tracking_id, sku) DO NOTHING",
+            rows,
+        )
+        conn.commit()
+        conn.close()
+        self.send_json(200, {"closed": len(rows), "reason": reason})
+
+    def reopen_returns(self):
+        self.require_admin()
+        items = self._closure_items(self.read_json_body())
+        conn = get_db()
+        placeholders = ",".join(["(%s, %s)"] * len(items))
+        gone = conn.execute(
+            f"DELETE FROM return_closures WHERE (return_tracking_id, sku) IN ({placeholders}) RETURNING return_tracking_id",
+            tuple(v for pair in items for v in pair),
+        ).fetchall()
+        conn.commit()
+        conn.close()
+        self.send_json(200, {"reopened": len(gone)})
+
+    def list_closed_returns(self):
+        scoped = self.scope_hub_id()
+        conn = get_db()
+        rows = conn.execute(
+            """
+            SELECT c.*, COALESCE(h.name, r.hub_name, 'Hub not matched') AS hub, r.return_type, r.seller_name, r.sale_price,
+                   EXISTS (SELECT 1 FROM shipment_items si
+                           WHERE si.tracking_id = c.return_tracking_id AND (si.sku IS NULL OR si.sku = c.sku)) AS packed_later
+            FROM return_closures c
+            LEFT JOIN returns r ON r.return_tracking_id = c.return_tracking_id AND r.sku = c.sku
+            LEFT JOIN hubs h ON h.id = c.hub_id
+            """ + (" WHERE c.hub_id = %s" if scoped is not None else "") + " ORDER BY c.closed_at DESC LIMIT 5000",
+            (scoped,) if scoped is not None else (),
+        ).fetchall()
+        conn.close()
+        self.send_json(200, [
+            {
+                "returnId": r["return_tracking_id"], "sku": r["sku"], "reason": r["reason"], "remarks": r["remarks"],
+                "hub": r["hub"], "closedBy": r["closed_by"], "closedAt": r["closed_at"], "returnType": r["return_type"],
+                "seller": r["seller_name"], "salePrice": float(r["sale_price"] or 0), "packedLater": r["packed_later"],
+            }
+            for r in rows
+        ])
 
     # Packed-but-not-dispatched and dispatched-but-not-delivered invoices
     # from the tracking start date on, oldest first (the ones to chase).

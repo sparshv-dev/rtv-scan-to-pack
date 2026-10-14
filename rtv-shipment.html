@@ -203,6 +203,12 @@ body:not(.is-admin) .admin-only { display: none !important; }
 .pill.b1 { color: var(--good); }
 .pill.b2 { color: var(--warn); }
 .pill.b3 { color: var(--bad); }
+.close-bar { display: none; grid-template-columns: auto 170px 1fr auto; gap: 10px; align-items: end; padding: 12px 14px; margin-bottom: 12px; border: 1.5px solid var(--accent); border-radius: 10px; }
+.close-bar.is-open { display: grid; }
+.close-bar .count { font-weight: 800; font-size: 14px; padding-bottom: 9px; }
+@media (max-width: 820px) { .close-bar { grid-template-columns: 1fr; } }
+.data-table td.pick, .data-table th.pick { width: 28px; }
+.pill.reason { color: var(--bad); }
 .id-list { font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.7; }
 .deliver-form { display: grid; grid-template-columns: 160px 1fr 1fr auto; gap: 10px; align-items: end; }
 .deliver-form .field label { font-size: 11px; }
@@ -645,7 +651,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   </div>
   <div class="card">
     <h2>Returns at the hub, not packed yet</h2>
-    <p class="hint">From the latest daily upload. Age counts from <b>Return Created At</b> for RTO and Home Trial returns, and from <b>Picked Up At</b> for all others. Returns already packed here, or shown dispatched / RTV delivered in the data, aren't counted. Click a number to see those returns.</p>
+    <p class="hint">From the latest daily upload. Age counts from <b>Return Created At</b> for RTO and Home Trial returns, and from <b>Picked Up At</b> for all others. A return leaves this list only when it's <b>packed here</b>, or the team <b>closes it</b> as Lost, Rider Miss or Store Miss. Click a number to see those returns.</p>
     <div class="table-wrap"><table class="pend-grid"><thead><tr><th>Hub</th><th>1 day</th><th>2 days</th><th>3+ days</th><th>Total</th></tr></thead><tbody id="pendGridBody"></tbody></table></div>
     <p class="hint" id="pendNote" style="margin:6px 0 0;"></p>
   </div>
@@ -664,10 +670,39 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <div class="field"><label for="pendBucket">Age</label><select id="pendBucket"><option value="">All</option><option value="1 day">1 day</option><option value="2 days">2 days</option><option value="3+ days">3+ days</option></select></div>
       <div class="field"><label for="pendType">Return type</label><select id="pendType"><option value="">All types</option></select></div>
     </div>
+    <div class="close-bar" id="pendCloseBar">
+      <div class="count" id="pendCloseCount"></div>
+      <div class="field"><label for="pendCloseReason">Close as</label>
+        <select id="pendCloseReason"><option value="">Pick a reason…</option><option>Lost</option><option>Rider Miss</option><option>Store Miss</option></select></div>
+      <div class="field"><label for="pendCloseRemarks">Remarks</label><input id="pendCloseRemarks" maxlength="1000" placeholder="What happened — who checked, where it was last seen…"></div>
+      <button type="button" class="btn small" id="pendCloseBtn">Close</button>
+      <p class="field-error" id="pendCloseErr" style="grid-column:1/-1; margin:0;"></p>
+    </div>
     <div class="table-wrap">
-      <table class="data-table"><thead><tr><th>Return ID</th><th>SKU</th><th>Type</th><th>Seller</th><th>Hub</th><th>Clock started</th><th>Age</th><th>Bucket</th><th>Status</th></tr></thead><tbody id="pendBody"></tbody></table>
+      <table class="data-table"><thead><tr><th class="pick"><input type="checkbox" id="pendPickAll" title="Select all shown"></th><th>Return ID</th><th>SKU</th><th>Type</th><th>Seller</th><th>Hub</th><th>Clock started</th><th>Age</th><th>Bucket</th><th>Status</th></tr></thead><tbody id="pendBody"></tbody></table>
     </div>
     <p class="hint" id="pendMore" style="margin:8px 0 0;"></p>
+  </div>
+  <div class="card">
+    <h2>Closed returns</h2>
+    <p class="hint">Returns closed as Lost, Rider Miss or Store Miss. An admin can reopen one closed by mistake — it goes back into pendency.</p>
+    <div class="table-toolbar">
+      <div class="stat-row" id="closedStats"></div>
+      <div class="actions">
+        <button type="button" class="link-btn" id="closedClear">Clear filters</button>
+        <button type="button" class="btn small secondary" id="closedCsv">Download CSV</button>
+      </div>
+    </div>
+    <div class="filter-bar">
+      <div class="field wide"><label for="closedSearch">Search</label><input id="closedSearch" placeholder="Return ID, SKU, remarks or who closed it…" autocomplete="off"></div>
+      <div class="field"><label for="closedReason">Reason</label><select id="closedReason"><option value="">All reasons</option><option>Lost</option><option>Rider Miss</option><option>Store Miss</option></select></div>
+      <div class="field"><label for="closedHub">Hub</label><select id="closedHub"><option value="">All hubs</option></select></div>
+      <div class="field"><label for="closedFrom">Closed from</label><input type="date" id="closedFrom"></div>
+      <div class="field"><label for="closedTo">Closed to</label><input type="date" id="closedTo"></div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>Return ID</th><th>SKU</th><th>Hub</th><th>Reason</th><th>Remarks</th><th>Closed by</th><th>Closed</th><th></th></tr></thead><tbody id="closedBody"></tbody></table>
+    </div>
   </div>
 </div>
 
@@ -2410,8 +2445,12 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
             addItemToBox({ tracking: tracking, sku: it.sku, value: it.value, qty: 1 }, currentVendor);
           });
           var hub = packingHub();
+          var notes = [];
           var other = o.data.items.find(function (it) { return it.hubId && hub && it.hubId !== hub.id; });
-          if (other) scanErrEl.textContent = "Note: the daily data has " + tracking + " at " + other.hubName + ", not " + hub.name + ".";
+          if (other) notes.push("the daily data has " + tracking + " at " + other.hubName + ", not " + hub.name);
+          var closed = o.data.items.find(function (it) { return it.closedReason; });
+          if (closed) notes.push(tracking + " was closed as " + closed.closedReason + " on " + formatDateTime(closed.closedAt) + " by " + closed.closedBy + " — packed anyway, since it's here");
+          if (notes.length) scanErrEl.textContent = "Note: " + notes.join("; ") + ".";
           scanInputEl.focus();
           return;
         }
@@ -3289,6 +3328,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   var PEND_BUCKETS = ["1 day", "2 days", "3+ days"];
   var PEND_SHOW_MAX = 500;
   var pendItems = [];
+  var pendPicked = new Set(); // "returnId|sku" of ticked rows
+  function pendKey(it) { return it.returnId + "|" + (it.sku || ""); }
   function showPendencyView() {
     currentTabShow = showPendencyView;
     hideAllTabViews();
@@ -3314,10 +3355,115 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       document.getElementById("pendNote").textContent = res.notPickedUp
         ? res.notPickedUp + " other return item" + (res.notPickedUp === 1 ? " hasn't" : "s haven't") + " been picked up yet (no Picked Up At), so they aren't counted."
         : "";
+      // Keep only ticks for returns that are still pending.
+      var live = new Set(pendItems.map(pendKey));
+      pendPicked.forEach(function (k) { if (!live.has(k)) pendPicked.delete(k); });
       renderPendGrid(hubs);
       renderPendList();
+      loadClosedReturns();
     }).catch(function (err) { toast("Couldn't load pendency: " + err.message, true); });
   }
+
+  function updateCloseBar() {
+    var n = pendPicked.size;
+    document.getElementById("pendCloseBar").classList.toggle("is-open", n > 0);
+    document.getElementById("pendCloseCount").textContent = n + " selected";
+    document.getElementById("pendCloseBtn").textContent = "Close " + n + " return item" + (n === 1 ? "" : "s");
+  }
+  document.getElementById("pendPickAll").addEventListener("change", function () {
+    var on = this.checked;
+    filteredPend().slice(0, PEND_SHOW_MAX).forEach(function (it) { if (on) pendPicked.add(pendKey(it)); else pendPicked.delete(pendKey(it)); });
+    renderPendList();
+  });
+  ["pendCloseReason", "pendCloseRemarks"].forEach(function (id) {
+    document.getElementById(id).addEventListener("input", function () { document.getElementById("pendCloseErr").textContent = ""; });
+  });
+  document.getElementById("pendCloseBtn").addEventListener("click", function () {
+    var err = document.getElementById("pendCloseErr");
+    var reason = document.getElementById("pendCloseReason").value;
+    var remarks = document.getElementById("pendCloseRemarks").value.trim();
+    if (!reason) { err.textContent = "Pick a reason: Lost, Rider Miss or Store Miss."; return; }
+    if (!remarks) { err.textContent = "Write a remark saying what happened."; return; }
+    var items = Array.from(pendPicked).map(function (k) { var i = k.indexOf("|"); return { returnId: k.slice(0, i), sku: k.slice(i + 1) }; });
+    if (!window.confirm("Close " + items.length + " return item" + (items.length === 1 ? "" : "s") + " as " + reason + "? They'll leave pendency.")) return;
+    var btn = this;
+    btn.disabled = true;
+    postJson("/api/pendency/close", { items: items, reason: reason, remarks: remarks })
+      .then(function (r) {
+        toast("Closed " + r.closed + " as " + r.reason);
+        pendPicked.clear();
+        document.getElementById("pendCloseReason").value = "";
+        document.getElementById("pendCloseRemarks").value = "";
+        return loadPendency();
+      })
+      .catch(function (e) { err.textContent = e.message; })
+      .then(function () { btn.disabled = false; });
+  });
+
+  // ---- closed returns ----
+  var closedRows = [];
+  function loadClosedReturns() {
+    return getJson("/api/pendency/closed").then(function (rows) {
+      closedRows = rows;
+      fillOptions(document.getElementById("closedHub"), Array.from(new Set(rows.map(function (r) { return r.hub; }))).sort(), "All hubs");
+      renderClosedReturns();
+    }).catch(function (err) { toast("Couldn't load closed returns: " + err.message, true); });
+  }
+  function filteredClosed() {
+    var q = document.getElementById("closedSearch").value.trim().toLowerCase();
+    var reason = document.getElementById("closedReason").value, hub = document.getElementById("closedHub").value;
+    var from = document.getElementById("closedFrom").value, to = document.getElementById("closedTo").value;
+    return closedRows.filter(function (r) {
+      var day = new Date(new Date(r.closedAt).getTime() + 5.5 * 3600000).toISOString().slice(0, 10);
+      if (reason && r.reason !== reason) return false;
+      if (hub && r.hub !== hub) return false;
+      if (from && day < from) return false;
+      if (to && day > to) return false;
+      return !q || [r.returnId, r.sku, r.remarks, r.closedBy].some(function (x) { return x && x.toLowerCase().indexOf(q) !== -1; });
+    });
+  }
+  function renderClosedReturns() {
+    var rows = filteredClosed();
+    document.getElementById("closedStats").innerHTML = ["Lost", "Rider Miss", "Store Miss"].map(function (rs) {
+      return "<span><b>" + closedRows.filter(function (r) { return r.reason === rs; }).length + "</b>" + rs + "</span>";
+    }).join("");
+    var body = document.getElementById("closedBody");
+    body.innerHTML = "";
+    rows.slice(0, PEND_SHOW_MAX).forEach(function (r) {
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td class='mono'>" + escapeHtml(r.returnId) + "</td><td class='mono'>" + escapeHtml(r.sku) + "</td><td>" + escapeHtml(r.hub) + "</td>" +
+        "<td><span class='pill reason'>" + escapeHtml(r.reason) + "</span>" + (r.packedLater ? " <span class='pill good'>Packed later</span>" : "") + "</td>" +
+        "<td>" + escapeHtml(r.remarks) + "</td><td>" + escapeHtml(r.closedBy) + "</td><td>" + escapeHtml(formatDateTime(r.closedAt)) + "</td><td></td>";
+      if (isAdmin()) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "link-btn";
+        b.textContent = "Reopen";
+        b.addEventListener("click", function () {
+          if (!window.confirm("Reopen " + r.returnId + (r.sku ? " (" + r.sku + ")" : "") + "? It goes back into pendency.")) return;
+          postJson("/api/pendency/reopen", { items: [{ returnId: r.returnId, sku: r.sku }] })
+            .then(function () { toast("Reopened " + r.returnId); return loadPendency(); })
+            .catch(function (e) { toast(e.message, true); });
+        });
+        tr.lastElementChild.appendChild(b);
+      }
+      body.appendChild(tr);
+    });
+    if (!rows.length) body.innerHTML = "<tr><td colspan='8' class='empty-state'>" + (closedRows.length ? "Nothing matches these filters." : "No returns closed yet.") + "</td></tr>";
+  }
+  ["closedSearch", "closedReason", "closedHub", "closedFrom", "closedTo"].forEach(function (id) {
+    document.getElementById(id).addEventListener(id === "closedSearch" ? "input" : "change", renderClosedReturns);
+  });
+  document.getElementById("closedClear").addEventListener("click", function () {
+    clearFilters(["closedSearch", "closedReason", "closedHub", "closedFrom", "closedTo"], renderClosedReturns);
+  });
+  document.getElementById("closedCsv").addEventListener("click", function () {
+    downloadCsv("rtv-closed-returns-" + istToday() + ".csv",
+      ["Return Tracking ID", "SKU", "Hub", "Return Type", "Seller", "Sale Price", "Reason", "Remarks", "Closed by", "Closed at", "Packed later"],
+      filteredClosed().map(function (r) {
+        return [r.returnId, r.sku, r.hub, r.returnType, r.seller, r.salePrice, r.reason, r.remarks, r.closedBy, r.closedAt, r.packedLater ? "Yes" : "No"];
+      }));
+  });
 
   function renderPendGrid(hubs) {
     var body = document.getElementById("pendGridBody");
@@ -3382,12 +3528,22 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     var body = document.getElementById("pendBody");
     body.innerHTML = rows.slice(0, PEND_SHOW_MAX).map(function (it) {
       var cls = it.bucket === "1 day" ? "b1" : it.bucket === "2 days" ? "b2" : "b3";
-      return "<tr><td class='mono'>" + escapeHtml(it.returnId) + "</td><td class='mono'>" + escapeHtml(it.sku) + "</td><td>" + escapeHtml(it.returnType) + "</td>" +
+      var key = pendKey(it);
+      return "<tr><td class='pick'><input type='checkbox' class='pend-pick' data-key='" + escapeHtml(key) + "'" + (pendPicked.has(key) ? " checked" : "") + "></td><td class='mono'>" + escapeHtml(it.returnId) + "</td><td class='mono'>" + escapeHtml(it.sku) + "</td><td>" + escapeHtml(it.returnType) + "</td>" +
         "<td>" + escapeHtml(it.seller) + "</td><td>" + escapeHtml(it.hub) + "</td>" +
         "<td>" + escapeHtml(formatDateTime(it.clockStart)) + "<div class='hint' style='margin:0;'>" + escapeHtml(it.clockColumn) + "</div></td>" +
         "<td>" + escapeHtml(ageText(it.ageHours)) + "</td><td><span class='pill " + cls + "'>" + escapeHtml(it.bucket) + "</span></td>" +
         "<td>" + escapeHtml(it.returnStatus || "") + "</td></tr>";
-    }).join("") || "<tr><td colspan='9' class='empty-state'>" + (pendItems.length ? "Nothing matches these filters." : "Nothing pending.") + "</td></tr>";
+    }).join("") || "<tr><td colspan='10' class='empty-state'>" + (pendItems.length ? "Nothing matches these filters." : "Nothing pending.") + "</td></tr>";
+    body.querySelectorAll(".pend-pick").forEach(function (cb) {
+      cb.addEventListener("change", function () {
+        if (cb.checked) pendPicked.add(cb.dataset.key); else pendPicked.delete(cb.dataset.key);
+        updateCloseBar();
+      });
+    });
+    var shown = rows.slice(0, PEND_SHOW_MAX);
+    document.getElementById("pendPickAll").checked = shown.length > 0 && shown.every(function (it) { return pendPicked.has(pendKey(it)); });
+    updateCloseBar();
     document.getElementById("pendMore").textContent = rows.length > PEND_SHOW_MAX
       ? "Showing the oldest " + PEND_SHOW_MAX + " of " + rows.length.toLocaleString("en-IN") + " — narrow the filters, or download the CSV for all of them." : "";
   }
