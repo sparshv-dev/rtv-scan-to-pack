@@ -480,6 +480,24 @@ def init_db():
         ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS sku TEXT;
         -- Pendency's second terminal (the first is being packed in the app):
         -- a return item closed by the team with a reason and remarks.
+        -- Issues a store raises with the admins (Raised issues / My tickets).
+        CREATE TABLE IF NOT EXISTS tickets (
+            id SERIAL PRIMARY KEY,
+            hub_id INTEGER REFERENCES hubs(id) ON DELETE SET NULL,
+            category TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            reference TEXT,
+            photo_url TEXT,
+            status TEXT NOT NULL DEFAULT 'Open' CHECK (status IN ('Open', 'In progress', 'Solved')),
+            admin_reply TEXT,
+            raised_by TEXT NOT NULL,
+            raised_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            updated_by TEXT,
+            solved_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_tickets_hub_id ON tickets(hub_id);
         CREATE TABLE IF NOT EXISTS return_closures (
             return_tracking_id TEXT NOT NULL,
             sku TEXT NOT NULL DEFAULT '',
@@ -913,6 +931,24 @@ def courier_booking_to_dict(row):
 
 MAX_POD_BYTES = 12 * 1024 * 1024
 CLOSURE_REASONS = ("Lost", "Rider Miss", "Store Miss")
+TICKET_CATEGORIES = (
+    "Packing / scanning", "Daily data", "Gate-out", "Delivery / POD", "Courier booking",
+    "Pending to Scan / closures", "Login / account", "Other",
+)
+TICKET_STATUSES = ("Open", "In progress", "Solved")
+
+
+def ticket_to_dict(r):
+    return {
+        "id": r["id"], "number": f"TKT-{r['id']:05d}", "hubId": r["hub_id"], "hub": r["hub_name"] or "—",
+        "category": r["category"], "title": r["title"], "description": r["description"], "reference": r["reference"],
+        "photoUrl": r["photo_url"], "status": r["status"], "adminReply": r["admin_reply"],
+        "raisedBy": r["raised_by"], "raisedAt": r["raised_at"], "updatedAt": r["updated_at"],
+        "updatedBy": r["updated_by"], "solvedAt": r["solved_at"],
+    }
+
+
+TICKET_SELECT_SQL = "SELECT t.*, h.name AS hub_name FROM tickets t LEFT JOIN hubs h ON h.id = t.hub_id "
 
 
 def shipment_status(row):
@@ -1260,6 +1296,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.list_shipments()
             if path == "/api/pendency":
                 return self.list_pendency()
+            if path == "/api/dashboard":
+                return self.dashboard()
+            if path == "/api/tickets":
+                return self.list_tickets()
+            if path == "/api/tickets/open-count":
+                return self.open_tickets_count()
             if path == "/api/pendency/closed":
                 return self.list_closed_returns()
             if path == "/api/shipments/open":
@@ -1324,6 +1366,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.set_view_hub()
             if path == "/api/gate-out":
                 return self.gate_out()
+            if path == "/api/tickets":
+                return self.create_ticket()
+            m = re.match(r"^/api/tickets/(\d+)/status$", path)
+            if m:
+                return self.update_ticket_status(int(m.group(1)))
             if path == "/api/pendency/close":
                 return self.close_returns()
             if path == "/api/pendency/reopen":
@@ -2010,6 +2057,111 @@ class Handler(BaseHTTPRequestHandler):
         FROM r LEFT JOIN hubs h ON h.id = r.hub_id
     """
 
+    # One call for the admin dashboard: every hub's numbers from each screen.
+    def dashboard(self):
+        self.require_admin()
+        now = datetime.now(timezone.utc)
+        today_ist = now.astimezone(IST).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = today_ist.astimezone(timezone.utc).isoformat()
+        three_days_ago = (now - timedelta(days=3)).isoformat()
+        week_ago = (now - timedelta(days=7)).isoformat()
+        conn = get_db()
+        since = (conn.execute("SELECT value FROM settings WHERE key = 'dispatch_tracking_from'").fetchone() or {"value": "1970-01-01"})["value"]
+        keys = ["pend1", "pend2", "pend3", "waitingGateOut", "waitingDelivery", "waiting3d", "mismatchInvoices",
+                "mismatchReturns", "requestedBookings", "openTickets", "packedToday", "dispatchedToday", "deliveredToday"]
+        hubs = {}
+
+        def hub(hid, name="Hub not matched"):
+            if hid not in hubs:
+                hubs[hid] = dict({"id": hid, "name": name}, **{k: 0 for k in keys})
+            return hubs[hid]
+
+        for r in conn.execute("SELECT id, name FROM hubs ORDER BY name").fetchall():
+            hub(r["id"], r["name"])
+
+        for r in conn.execute(self.PENDENCY_SQL).fetchall():
+            if r["clock_start"] is None:
+                continue
+            hours = float(r["age_hours"])
+            hub(r["hub_id"])["pend1" if hours < 24 else "pend2" if hours < 48 else "pend3"] += 1
+
+        for r in conn.execute(
+            """
+            SELECT hub_id,
+                   COUNT(*) FILTER (WHERE dispatched_at IS NULL) AS packed,
+                   COUNT(*) FILTER (WHERE dispatched_at IS NOT NULL) AS dispatched,
+                   COUNT(*) FILTER (WHERE COALESCE(dispatched_at, created_at) < %s) AS old3
+            FROM shipments WHERE delivered_at IS NULL AND ship_date >= %s GROUP BY hub_id
+            """,
+            (three_days_ago, since),
+        ).fetchall():
+            h = hub(r["hub_id"])
+            h["waitingGateOut"], h["waitingDelivery"], h["waiting3d"] = r["packed"], r["dispatched"], r["old3"]
+
+        for r in conn.execute(
+            """
+            SELECT s.hub_id, COUNT(DISTINCT s.id) AS invoices, COUNT(DISTINCT si.tracking_id) AS returns
+            FROM shipments s
+            JOIN shipment_items si ON si.shipment_id = s.id
+            LEFT JOIN LATERAL (
+                SELECT * FROM returns r
+                WHERE r.return_tracking_id = si.tracking_id AND (si.sku IS NULL OR r.sku = si.sku)
+                ORDER BY r.rtv_delivered_at NULLS FIRST LIMIT 1
+            ) r ON TRUE
+            WHERE s.delivered_at IS NOT NULL AND r.rtv_delivered_at IS NULL
+              AND COALESCE(r.rtv_shipment_status, '') NOT ILIKE '%%deliver%%'
+            GROUP BY s.hub_id
+            """
+        ).fetchall():
+            h = hub(r["hub_id"])
+            h["mismatchInvoices"], h["mismatchReturns"] = r["invoices"], r["returns"]
+
+        bookings = {st: 0 for st in COURIER_BOOKING_STATUSES}
+        for r in conn.execute("SELECT hub_id, status, COUNT(*) AS n FROM courier_bookings GROUP BY hub_id, status").fetchall():
+            bookings[r["status"]] = bookings.get(r["status"], 0) + r["n"]
+            if r["status"] == "Requested":
+                hub(r["hub_id"])["requestedBookings"] += r["n"]
+
+        tickets = {st: 0 for st in TICKET_STATUSES}
+        for r in conn.execute("SELECT hub_id, status, COUNT(*) AS n FROM tickets GROUP BY hub_id, status").fetchall():
+            tickets[r["status"]] += r["n"]
+            if r["status"] != "Solved":
+                hub(r["hub_id"])["openTickets"] += r["n"]
+
+        for r in conn.execute(
+            """
+            SELECT hub_id,
+                   COUNT(*) FILTER (WHERE created_at >= %s) AS packed,
+                   COUNT(*) FILTER (WHERE dispatched_at >= %s) AS dispatched,
+                   COUNT(*) FILTER (WHERE delivered_at >= %s) AS delivered
+            FROM shipments
+            WHERE created_at >= %s OR dispatched_at >= %s OR delivered_at >= %s
+            GROUP BY hub_id
+            """,
+            (today_start,) * 6,
+        ).fetchall():
+            h = hub(r["hub_id"])
+            h["packedToday"], h["dispatchedToday"], h["deliveredToday"] = r["packed"], r["dispatched"], r["delivered"]
+
+        closures = {rs: 0 for rs in CLOSURE_REASONS}
+        for r in conn.execute("SELECT reason, COUNT(*) AS n FROM return_closures WHERE closed_at >= %s GROUP BY reason", (week_ago,)).fetchall():
+            closures[r["reason"]] = r["n"]
+
+        last = conn.execute("SELECT * FROM dump_imports ORDER BY id DESC LIMIT 1").fetchone()
+        conn.close()
+
+        rows = sorted(hubs.values(), key=lambda h: (h["name"] == "Hub not matched", h["name"]))
+        rows = [h for h in rows if h["id"] is not None or any(h[k] for k in keys)]
+        totals = {k: sum(h[k] for h in rows) for k in keys}
+        self.send_json(200, {
+            "asOf": now.isoformat(), "trackingFrom": since, "hubs": rows, "totals": totals,
+            "bookings": bookings, "tickets": tickets, "closures7d": closures,
+            "lastImport": {
+                "createdAt": last["created_at"], "by": last["uploaded_by"], "filename": last["filename"],
+                "rows": last["total_rows"] - last["blank_rows"], "inserted": last["inserted"], "updated": last["updated"],
+            } if last else None,
+        })
+
     def list_pendency(self):
         scoped = self.scope_hub_id()
         where, params = "", []
@@ -2559,6 +2711,116 @@ class Handler(BaseHTTPRequestHandler):
         conn.commit()
         conn.close()
         self.send_json(200, {"id": booking_id})
+
+    # ---------- tickets ----------
+    def create_ticket(self):
+        user = self.require_user()
+        if int(self.headers.get("Content-Length", 0) or 0) > MAX_POD_BYTES * 2:
+            raise ApiError(413, "Photo is too large")
+        body = self.read_json_body()
+        category = (body.get("category") or "").strip()
+        if category not in TICKET_CATEGORIES:
+            raise ApiError(400, "Pick a category")
+        title = (body.get("title") or "").strip()[:150]
+        description = (body.get("description") or "").strip()[:4000]
+        if not title:
+            raise ApiError(400, "Give the issue a short title")
+        if not description:
+            raise ApiError(400, "Describe the issue")
+        reference = (body.get("reference") or "").strip()[:200] or None
+        # A hub account raises for its own hub; an admin raises for the hub
+        # they're viewing (or none).
+        hub_id = user["hub_id"] if user["role"] == "hub" else user["view_hub_id"]
+        photo_b64 = body.get("photoBase64") or ""
+        now = datetime.now(timezone.utc).isoformat()
+        conn = get_db()
+        tid = conn.execute(
+            "INSERT INTO tickets (hub_id, category, title, description, reference, raised_by, raised_at, updated_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (hub_id, category, title, description, reference, user["username"], now, now),
+        ).fetchone()["id"]
+        conn.commit()
+        conn.close()
+        if photo_b64:
+            try:
+                data = base64.b64decode(photo_b64, validate=True)
+            except (ValueError, TypeError):
+                raise ApiError(400, "The photo didn't upload properly — try again")
+            try:
+                _fid, url = upload_pod_to_drive(data, "image/jpeg", f"TKT-{tid:05d}-{now[:10]}.jpg", now[:7])
+            except ApiError as e:
+                # Keep the ticket; just say the photo didn't make it.
+                conn = get_db()
+                conn.execute("UPDATE tickets SET description = description || %s WHERE id = %s",
+                             ("\n\n(Photo couldn't be saved: " + e.message + ")", tid))
+                conn.commit()
+                conn.close()
+                url = None
+            if url:
+                conn = get_db()
+                conn.execute("UPDATE tickets SET photo_url = %s WHERE id = %s", (url, tid))
+                conn.commit()
+                conn.close()
+        conn = get_db()
+        row = conn.execute(TICKET_SELECT_SQL + "WHERE t.id = %s", (tid,)).fetchone()
+        conn.close()
+        self.send_json(201, ticket_to_dict(row))
+
+    def list_tickets(self):
+        hub_sql, params = self.hub_filter("t.hub_id")
+        conn = get_db()
+        rows = conn.execute(TICKET_SELECT_SQL + "WHERE TRUE" + hub_sql + " ORDER BY t.id DESC LIMIT 5000", tuple(params)).fetchall()
+        conn.close()
+        self.send_json(200, [ticket_to_dict(r) for r in rows])
+
+    def open_tickets_count(self):
+        hub_sql, params = self.hub_filter("hub_id")
+        conn = get_db()
+        n = conn.execute("SELECT COUNT(*) AS n FROM tickets WHERE status <> 'Solved'" + hub_sql, tuple(params)).fetchone()["n"]
+        conn.close()
+        self.send_json(200, {"open": n})
+
+    # Admins move a ticket along (with a reply the store sees); a store can
+    # only reopen its own solved ticket, saying why.
+    def update_ticket_status(self, ticket_id):
+        user = self.require_user()
+        body = self.read_json_body()
+        status = (body.get("status") or "").strip()
+        reply = (body.get("reply") or "").strip()[:4000]
+        if status not in TICKET_STATUSES:
+            raise ApiError(400, "status must be Open, In progress or Solved")
+        hub_sql, params = self.hub_filter("t.hub_id")
+        conn = get_db()
+        row = conn.execute(TICKET_SELECT_SQL + "WHERE t.id = %s" + hub_sql, (ticket_id, *params)).fetchone()
+        if not row:
+            conn.close()
+            raise ApiError(404, "Ticket not found")
+        now = datetime.now(timezone.utc).isoformat()
+        if user["role"] != "admin":
+            if not (row["status"] == "Solved" and status == "Open"):
+                conn.close()
+                raise ApiError(403, "Only admins update tickets — you can reopen a solved one")
+            if not reply:
+                conn.close()
+                raise ApiError(400, "Say why you're reopening it")
+            conn.execute(
+                "UPDATE tickets SET status = 'Open', solved_at = NULL, updated_at = %s, updated_by = %s, "
+                "description = description || %s WHERE id = %s",
+                (now, user["username"], f"\n\nReopened by {user['username']} ({now[:10]}): {reply}", ticket_id),
+            )
+        else:
+            if status == "Solved" and not (reply or row["admin_reply"]):
+                conn.close()
+                raise ApiError(400, "Add a reply saying how it was solved")
+            conn.execute(
+                "UPDATE tickets SET status = %s, admin_reply = COALESCE(NULLIF(%s, ''), admin_reply), updated_at = %s, updated_by = %s, "
+                "solved_at = CASE WHEN %s = 'Solved' THEN %s ELSE NULL END WHERE id = %s",
+                (status, reply, now, user["username"], status, now, ticket_id),
+            )
+        conn.commit()
+        row = conn.execute(TICKET_SELECT_SQL + "WHERE t.id = %s", (ticket_id,)).fetchone()
+        conn.close()
+        self.send_json(200, ticket_to_dict(row))
 
     def share_courier_bookings(self):
         self.require_admin()

@@ -215,6 +215,33 @@ body:not(.is-admin) .admin-only { display: none !important; }
 .pill.st-Shared { color: var(--accent); }
 .pill.st-Picked, .pill.st-In { color: var(--warn); }
 .pill.st-Delivered { color: var(--good); }
+body.is-admin .hub-only { display: none !important; }
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.kpi { text-align: left; font: inherit; background: var(--paper-raised); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; cursor: pointer; color: var(--ink); }
+.kpi:hover { border-color: var(--accent); }
+.kpi .k { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.kpi .v { font-size: 28px; font-weight: 800; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+.kpi .sub { font-size: 12px; color: var(--muted); }
+.kpi .sub b.bad, .kpi .v.bad { color: var(--bad); }
+.today-strip { display: flex; gap: 22px; flex-wrap: wrap; font-size: 13px; }
+.today-strip b { font-size: 20px; font-weight: 800; margin-right: 4px; }
+.dash-hubs td.num, .dash-hubs th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.dash-hubs td.bad { color: var(--bad); font-weight: 700; }
+.dash-hubs tr.total td { font-weight: 800; border-top: 2px solid var(--line); }
+.mini-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.mini-grid .card { margin: 0; }
+.mini-grid .row { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
+.mini-grid .row:last-child { border-bottom: none; }
+.pill.tk-Open { color: var(--bad); }
+.pill.tk-In { color: var(--warn); }
+.pill.tk-Solved { color: var(--good); }
+.ticket-title { font-weight: 700; }
+.ticket-desc { font-size: 12px; color: var(--muted); white-space: pre-wrap; max-width: 46ch; }
+.ticket-reply { font-size: 12.5px; white-space: pre-wrap; max-width: 40ch; }
+.tk-form-grid { display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 12px; }
+.tk-form-grid .full { grid-column: 1 / -1; }
+.tk-form-grid textarea { font: inherit; font-size: 13.5px; padding: 9px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); min-height: 90px; resize: vertical; }
+@media (max-width: 820px) { .tk-form-grid { grid-template-columns: 1fr; } }
 .id-list { font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.7; }
 .deliver-form { display: grid; grid-template-columns: 160px 1fr 1fr auto; gap: 10px; align-items: end; }
 .deliver-form .field label { font-size: 11px; }
@@ -352,7 +379,10 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <button type="button" id="tabToMarkDelivered" aria-selected="false">Delivery mismatch (App vs HMS)</button>
     <button type="button" id="tabShipmentArchive" aria-selected="false">Shipment archive</button>
     <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings<span class="nav-badge" id="cbNavBadge" title="Bookings waiting to be shared with DTDC"></span></button>
+    <button type="button" id="tabMyTickets" class="hub-only" aria-selected="false">My tickets</button>
     <div class="side-nav-label admin-only">Admin</div>
+    <button type="button" id="tabDashboard" class="admin-only" aria-selected="false">Dashboard</button>
+    <button type="button" id="tabRaisedIssues" class="admin-only" aria-selected="false">Raised issues<span class="nav-badge" id="tkNavBadge" title="Tickets not solved yet"></span></button>
     <button type="button" id="tabDailyData" class="admin-only" aria-selected="false">Daily data</button>
     <button type="button" id="tabBrands" class="admin-only" aria-selected="false">Brands</button>
     <button type="button" id="tabHubAccounts" class="admin-only" aria-selected="false">Hub accounts</button>
@@ -705,6 +735,102 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     </div>
     <div class="table-wrap">
       <table class="data-table"><thead><tr><th>Return ID</th><th>SKU</th><th>Hub</th><th>Reason</th><th>Remarks</th><th>Closed by</th><th>Closed</th><th></th></tr></thead><tbody id="closedBody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<div class="app-shell" id="dashboardView" style="display:none; max-width: 1300px;">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · all hubs</p>
+      <h1>Dashboard</h1>
+    </div>
+    <div style="display:flex; gap:12px; align-items:center;">
+      <span class="hint" style="margin:0;" id="dashAsOf"></span>
+      <button type="button" class="btn small secondary" id="dashRefresh">Refresh</button>
+    </div>
+  </div>
+  <div class="kpi-grid" id="dashKpis"></div>
+  <div class="card">
+    <h2>Today</h2>
+    <div class="today-strip" id="dashToday"></div>
+  </div>
+  <div class="card">
+    <div class="table-toolbar">
+      <h2 style="margin:0;">By hub</h2>
+      <div class="actions"><button type="button" class="btn small secondary" id="dashCsv">Download CSV</button></div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table dash-hubs"><thead><tr><th>Hub</th><th class="num">To scan 1d</th><th class="num">2d</th><th class="num">3+d</th><th class="num">Waiting gate-out</th><th class="num">Waiting delivery</th><th class="num">Waiting 3+ days</th><th class="num">Mismatch (invoices)</th><th class="num">Courier requests</th><th class="num">Open tickets</th><th class="num">Packed today</th><th class="num">Dispatched today</th><th class="num">Delivered today</th></tr></thead><tbody id="dashHubBody"></tbody></table>
+    </div>
+  </div>
+  <div class="mini-grid" id="dashMini"></div>
+</div>
+
+<div class="app-shell" id="myTicketsView" style="display:none; max-width: 1240px;">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · help</p>
+      <h1>My tickets</h1>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Raise an issue</h2>
+    <p class="hint">Stuck on something in the app or the process? Tell the admins here — you'll see their reply and the status below.</p>
+    <div class="tk-form-grid">
+      <div class="field"><label for="tkCategory">Category</label><select id="tkCategory"><option value="">Pick one…</option></select></div>
+      <div class="field"><label for="tkTitle">Title</label><input id="tkTitle" maxlength="150" placeholder="Gate-out scan says invoice not found"></div>
+      <div class="field"><label for="tkReference">Reference (optional)</label><input id="tkReference" maxlength="200" placeholder="Invoice, return or booking ID"></div>
+      <div class="field full"><label for="tkDescription">What happened</label><textarea id="tkDescription" maxlength="4000" placeholder="What you were doing, what you expected, what you saw instead…"></textarea></div>
+      <div class="field"><label for="tkPhoto">Photo / screenshot (optional)</label><input type="file" id="tkPhoto" accept="image/*"></div>
+    </div>
+    <p class="field-error" id="tkError"></p>
+    <button type="button" class="btn" id="tkSubmit">Raise ticket</button>
+  </div>
+  <div class="card">
+    <h2>Your hub's tickets</h2>
+    <div class="table-toolbar">
+      <div class="stat-row" id="myTkStats"></div>
+      <div class="actions">
+        <button type="button" class="link-btn" id="myTkClear">Clear filters</button>
+        <button type="button" class="btn small secondary" id="myTkCsv">Download CSV</button>
+      </div>
+    </div>
+    <div class="filter-bar">
+      <div class="field wide"><label for="myTkSearch">Search</label><input id="myTkSearch" placeholder="Ticket number, title, reference…" autocomplete="off"></div>
+      <div class="field"><label for="myTkStatus">Status</label><select id="myTkStatus"><option value="">All</option><option>Open</option><option>In progress</option><option>Solved</option></select></div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>Ticket</th><th>Raised</th><th>Category</th><th>Issue</th><th>Reference</th><th>Status</th><th>Admin reply</th><th></th></tr></thead><tbody id="myTkBody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<div class="app-shell" id="raisedIssuesView" style="display:none; max-width: 1340px;">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · admin</p>
+      <h1>Raised issues</h1>
+    </div>
+  </div>
+  <div class="card">
+    <div class="table-toolbar">
+      <div class="stat-row" id="riStats"></div>
+      <div class="actions">
+        <button type="button" class="link-btn" id="riClear">Clear filters</button>
+        <button type="button" class="btn small secondary" id="riCsv">Download CSV</button>
+      </div>
+    </div>
+    <div class="filter-bar">
+      <div class="field wide"><label for="riSearch">Search</label><input id="riSearch" placeholder="Ticket, title, description, reference, who raised it…" autocomplete="off"></div>
+      <div class="field"><label for="riStatus">Status</label><select id="riStatus"><option value="">All</option><option value="unsolved">Not solved</option><option>Open</option><option>In progress</option><option>Solved</option></select></div>
+      <div class="field"><label for="riHub">Hub</label><select id="riHub"><option value="">All hubs</option></select></div>
+      <div class="field"><label for="riCategory">Category</label><select id="riCategory"><option value="">All categories</option></select></div>
+      <div class="field"><label for="riFrom">Raised from</label><input type="date" id="riFrom"></div>
+      <div class="field"><label for="riTo">Raised to</label><input type="date" id="riTo"></div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>Ticket</th><th>Raised</th><th>Hub</th><th>Category</th><th>Issue</th><th>Reference</th><th>Status</th><th>Reply</th><th></th></tr></thead><tbody id="riBody"></tbody></table>
     </div>
   </div>
 </div>
@@ -3054,6 +3180,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     document.getElementById("tabOpenShipments").setAttribute("aria-selected", "false");
     document.getElementById("pendencyView").style.display = "none";
     document.getElementById("tabPendency").setAttribute("aria-selected", "false");
+    ["dashboardView", "myTicketsView", "raisedIssuesView"].forEach(function (id) { document.getElementById(id).style.display = "none"; });
+    ["tabDashboard", "tabMyTickets", "tabRaisedIssues"].forEach(function (id) { document.getElementById(id).setAttribute("aria-selected", "false"); });
     document.getElementById("toMarkDeliveredView").style.display = "none";
     document.getElementById("tabToMarkDelivered").setAttribute("aria-selected", "false");
     document.getElementById("tabPackShipments").setAttribute("aria-selected", "false");
@@ -3376,6 +3504,278 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     });
     tr.after(row);
   }
+
+  // ================= tickets =================
+  var TICKET_CATEGORIES = ["Packing / scanning", "Daily data", "Gate-out", "Delivery / POD", "Courier booking", "Pending to Scan / closures", "Login / account", "Other"];
+  fillOptions(document.getElementById("tkCategory"), TICKET_CATEGORIES, "Pick one…");
+  fillOptions(document.getElementById("riCategory"), TICKET_CATEGORIES, "All categories");
+  var allTickets = [];
+
+  function refreshTicketBadge() {
+    if (!isAdmin()) return;
+    getJson("/api/tickets/open-count")
+      .then(function (r) { document.getElementById("tkNavBadge").textContent = r.open ? String(r.open) : ""; })
+      .catch(function () {});
+  }
+  setInterval(refreshTicketBadge, 120000);
+
+  function ticketStatusPill(t) {
+    return "<span class='pill tk-" + escapeHtml(t.status.split(" ")[0]) + "'>" + escapeHtml(t.status) + "</span>";
+  }
+  function ticketIssueCell(t) {
+    return "<div class='ticket-title'>" + escapeHtml(t.title) + "</div><div class='ticket-desc'>" + escapeHtml(t.description) + "</div>" +
+      (t.photoUrl ? "<a href='" + escapeHtml(t.photoUrl) + "' target='_blank' rel='noopener'>Photo</a>" : "");
+  }
+  function istDay(iso) { return new Date(new Date(iso).getTime() + 5.5 * 3600000).toISOString().slice(0, 10); }
+  function ticketCsvRows(rows) {
+    return rows.map(function (t) {
+      return [t.number, t.raisedAt, t.hub, t.raisedBy, t.category, t.title, t.description, t.reference || "", t.status, t.adminReply || "", t.updatedBy || "", t.solvedAt || "", t.photoUrl || ""];
+    });
+  }
+  var TICKET_CSV_HEADER = ["Ticket", "Raised at", "Hub", "Raised by", "Category", "Title", "Description", "Reference", "Status", "Admin reply", "Last updated by", "Solved at", "Photo"];
+
+  function loadTickets(render) {
+    return getJson("/api/tickets").then(function (rows) { allTickets = rows; render(); refreshTicketBadge(); })
+      .catch(function (err) { toast("Couldn't load tickets: " + err.message, true); });
+  }
+
+  // ---- My tickets (hub) ----
+  function showMyTicketsView() {
+    currentTabShow = showMyTicketsView;
+    hideAllTabViews();
+    document.getElementById("myTicketsView").style.display = "block";
+    document.getElementById("tabMyTickets").setAttribute("aria-selected", "true");
+    loadTickets(renderMyTickets);
+  }
+  document.getElementById("tabMyTickets").addEventListener("click", showMyTicketsView);
+
+  function filteredMyTickets() {
+    var q = document.getElementById("myTkSearch").value.trim().toLowerCase();
+    var st = document.getElementById("myTkStatus").value;
+    return allTickets.filter(function (t) {
+      if (st && t.status !== st) return false;
+      return !q || [t.number, t.title, t.description, t.reference, t.category].some(function (x) { return x && x.toLowerCase().indexOf(q) !== -1; });
+    });
+  }
+  function renderMyTickets() {
+    var rows = filteredMyTickets();
+    document.getElementById("myTkStats").innerHTML = ["Open", "In progress", "Solved"].map(function (st) {
+      return "<span><b>" + allTickets.filter(function (t) { return t.status === st; }).length + "</b>" + st + "</span>";
+    }).join("");
+    var body = document.getElementById("myTkBody");
+    body.innerHTML = "";
+    rows.forEach(function (t) {
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td class='mono'>" + escapeHtml(t.number) + "</td><td>" + escapeHtml(formatDateTime(t.raisedAt)) + "<div class='hint' style='margin:0;'>" + escapeHtml(t.raisedBy) + "</div></td>" +
+        "<td>" + escapeHtml(t.category) + "</td><td>" + ticketIssueCell(t) + "</td><td class='mono'>" + escapeHtml(t.reference || "") + "</td>" +
+        "<td>" + ticketStatusPill(t) + "</td><td class='ticket-reply'>" + escapeHtml(t.adminReply || "") + "</td><td></td>";
+      if (t.status === "Solved") {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "link-btn";
+        b.textContent = "Reopen";
+        b.addEventListener("click", function () {
+          var why = window.prompt("Why are you reopening " + t.number + "?");
+          if (!why || !why.trim()) return;
+          fetchJson("/api/tickets/" + t.id + "/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "Open", reply: why.trim() }) })
+            .then(function () { toast(t.number + " reopened"); return loadTickets(renderMyTickets); })
+            .catch(function (e) { toast(e.message, true); });
+        });
+        tr.lastElementChild.appendChild(b);
+      }
+      body.appendChild(tr);
+    });
+    if (!rows.length) body.innerHTML = "<tr><td colspan='8' class='empty-state'>" + (allTickets.length ? "Nothing matches these filters." : "No tickets yet.") + "</td></tr>";
+  }
+  ["myTkSearch", "myTkStatus"].forEach(function (id) {
+    document.getElementById(id).addEventListener(id === "myTkSearch" ? "input" : "change", renderMyTickets);
+  });
+  document.getElementById("myTkClear").addEventListener("click", function () { clearFilters(["myTkSearch", "myTkStatus"], renderMyTickets); });
+  document.getElementById("myTkCsv").addEventListener("click", function () {
+    downloadCsv("rtv-my-tickets-" + istToday() + ".csv", TICKET_CSV_HEADER, ticketCsvRows(filteredMyTickets()));
+  });
+
+  ["tkCategory", "tkTitle", "tkDescription"].forEach(function (id) {
+    document.getElementById(id).addEventListener("input", function () { document.getElementById("tkError").textContent = ""; });
+  });
+  document.getElementById("tkSubmit").addEventListener("click", function () {
+    var err = document.getElementById("tkError");
+    var category = document.getElementById("tkCategory").value;
+    var title = document.getElementById("tkTitle").value.trim();
+    var description = document.getElementById("tkDescription").value.trim();
+    if (!category) { err.textContent = "Pick a category."; return; }
+    if (!title) { err.textContent = "Give the issue a short title."; return; }
+    if (!description) { err.textContent = "Describe what happened."; return; }
+    var file = document.getElementById("tkPhoto").files[0];
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = file ? "Uploading…" : "Sending…";
+    (file ? compressPhoto(file) : Promise.resolve(null))
+      .then(function (b64) {
+        return postJson("/api/tickets", {
+          category: category, title: title, description: description,
+          reference: document.getElementById("tkReference").value.trim(), photoBase64: b64 || "",
+        });
+      })
+      .then(function (t) {
+        toast(t.number + " raised — the admins will reply here");
+        ["tkCategory", "tkTitle", "tkReference", "tkDescription", "tkPhoto"].forEach(function (id) { document.getElementById(id).value = ""; });
+        return loadTickets(renderMyTickets);
+      })
+      .catch(function (e) { err.textContent = e.message; })
+      .then(function () { btn.disabled = false; btn.textContent = "Raise ticket"; });
+  });
+
+  // ---- Raised issues (admin) ----
+  function showRaisedIssuesView() {
+    currentTabShow = showRaisedIssuesView;
+    hideAllTabViews();
+    document.getElementById("raisedIssuesView").style.display = "block";
+    document.getElementById("tabRaisedIssues").setAttribute("aria-selected", "true");
+    loadTickets(renderRaisedIssues);
+  }
+  document.getElementById("tabRaisedIssues").addEventListener("click", showRaisedIssuesView);
+
+  function filteredRaised() {
+    var q = document.getElementById("riSearch").value.trim().toLowerCase();
+    var st = document.getElementById("riStatus").value, hub = document.getElementById("riHub").value;
+    var cat = document.getElementById("riCategory").value;
+    var from = document.getElementById("riFrom").value, to = document.getElementById("riTo").value;
+    return allTickets.filter(function (t) {
+      if (st === "unsolved" ? t.status === "Solved" : st && t.status !== st) return false;
+      if (hub && t.hub !== hub) return false;
+      if (cat && t.category !== cat) return false;
+      var day = istDay(t.raisedAt);
+      if (from && day < from) return false;
+      if (to && day > to) return false;
+      return !q || [t.number, t.title, t.description, t.reference, t.raisedBy, t.adminReply].some(function (x) { return x && x.toLowerCase().indexOf(q) !== -1; });
+    });
+  }
+  function renderRaisedIssues() {
+    fillOptions(document.getElementById("riHub"), Array.from(new Set(allTickets.map(function (t) { return t.hub; }))).sort(), "All hubs");
+    var rows = filteredRaised();
+    document.getElementById("riStats").innerHTML = ["Open", "In progress", "Solved"].map(function (st) {
+      return "<span><b>" + allTickets.filter(function (t) { return t.status === st; }).length + "</b>" + st + "</span>";
+    }).join("");
+    var body = document.getElementById("riBody");
+    body.innerHTML = "";
+    rows.forEach(function (t) {
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td class='mono'>" + escapeHtml(t.number) + "</td><td>" + escapeHtml(formatDateTime(t.raisedAt)) + "<div class='hint' style='margin:0;'>" + escapeHtml(t.raisedBy) + "</div></td>" +
+        "<td>" + escapeHtml(t.hub) + "</td><td>" + escapeHtml(t.category) + "</td><td>" + ticketIssueCell(t) + "</td><td class='mono'>" + escapeHtml(t.reference || "") + "</td>" +
+        "<td>" + ticketStatusPill(t) + "</td><td class='ticket-reply'>" + escapeHtml(t.adminReply || "") + "</td><td></td>";
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn small secondary";
+      b.textContent = "Update";
+      b.addEventListener("click", function () {
+        var next = tr.nextElementSibling;
+        if (next && next.classList.contains("deliver-row")) { next.remove(); return; }
+        var row = document.createElement("tr");
+        row.className = "deliver-row";
+        row.innerHTML = "<td colspan='9'><div class='deliver-form' style='grid-template-columns: 170px 1fr auto;'>" +
+          "<div class='field'><label>Status</label><select class='ri-status'><option>Open</option><option>In progress</option><option>Solved</option></select></div>" +
+          "<div class='field'><label>Reply to the store</label><input class='ri-reply' maxlength='4000' placeholder='What you did / what they should do'></div>" +
+          "<button type='button' class='btn small ri-save'>Save</button></div><p class='field-error ri-err' style='margin:6px 0 0;'></p></td>";
+        row.querySelector(".ri-status").value = t.status === "Open" ? "In progress" : t.status;
+        row.querySelector(".ri-reply").value = t.adminReply || "";
+        row.querySelector(".ri-save").addEventListener("click", function () {
+          var status = row.querySelector(".ri-status").value, reply = row.querySelector(".ri-reply").value.trim();
+          if (status === "Solved" && !reply) { row.querySelector(".ri-err").textContent = "Add a reply saying how it was solved."; return; }
+          postJson("/api/tickets/" + t.id + "/status", { status: status, reply: reply })
+            .then(function (u) { toast(u.number + ": " + u.status); return loadTickets(renderRaisedIssues); })
+            .catch(function (e) { row.querySelector(".ri-err").textContent = e.message; });
+        });
+        tr.after(row);
+      });
+      tr.lastElementChild.appendChild(b);
+      body.appendChild(tr);
+    });
+    if (!rows.length) body.innerHTML = "<tr><td colspan='9' class='empty-state'>" + (allTickets.length ? "Nothing matches these filters." : "No tickets raised yet.") + "</td></tr>";
+  }
+  ["riSearch", "riStatus", "riHub", "riCategory", "riFrom", "riTo"].forEach(function (id) {
+    document.getElementById(id).addEventListener(id === "riSearch" ? "input" : "change", renderRaisedIssues);
+  });
+  document.getElementById("riClear").addEventListener("click", function () {
+    clearFilters(["riSearch", "riStatus", "riHub", "riCategory", "riFrom", "riTo"], renderRaisedIssues);
+  });
+  document.getElementById("riCsv").addEventListener("click", function () {
+    downloadCsv("rtv-raised-issues-" + istToday() + ".csv", TICKET_CSV_HEADER, ticketCsvRows(filteredRaised()));
+  });
+
+  // ================= admin dashboard =================
+  var dashData = null;
+  function showDashboardView() {
+    currentTabShow = showDashboardView;
+    hideAllTabViews();
+    document.getElementById("dashboardView").style.display = "block";
+    document.getElementById("tabDashboard").setAttribute("aria-selected", "true");
+    loadDashboard();
+  }
+  document.getElementById("tabDashboard").addEventListener("click", showDashboardView);
+  document.getElementById("dashRefresh").addEventListener("click", loadDashboard);
+
+  function n(v) { return Number(v || 0).toLocaleString("en-IN"); }
+
+  function loadDashboard() {
+    document.getElementById("dashAsOf").textContent = "Loading…";
+    return getJson("/api/dashboard").then(function (d) {
+      dashData = d;
+      var t = d.totals;
+      document.getElementById("dashAsOf").textContent = "Updated " + formatDateTime(d.asOf);
+      var kpis = [
+        { k: "Pending to Scan", v: t.pend1 + t.pend2 + t.pend3, sub: "<b class='bad'>" + n(t.pend3) + "</b> at 3+ days · " + n(t.pend2) + " at 2 days", go: showPendencyView, bad: t.pend3 > 0 },
+        { k: "Waiting for gate-out", v: t.waitingGateOut, sub: "packed, not dispatched", go: showOpenShipmentsView },
+        { k: "Waiting for delivery", v: t.waitingDelivery, sub: "<b class='bad'>" + n(t.waiting3d) + "</b> invoices waiting 3+ days", go: showOpenShipmentsView },
+        { k: "Delivery mismatch", v: t.mismatchInvoices, sub: n(t.mismatchReturns) + " returns to mark in HMS", go: showToMarkDeliveredView },
+        { k: "Courier requests", v: t.requestedBookings, sub: "waiting to be shared with DTDC", go: showCourierBookingsView, bad: t.requestedBookings > 0 },
+        { k: "Open tickets", v: t.openTickets, sub: n(d.tickets["In progress"]) + " in progress", go: showRaisedIssuesView, bad: t.openTickets > 0 },
+      ];
+      var grid = document.getElementById("dashKpis");
+      grid.innerHTML = "";
+      kpis.forEach(function (c) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "kpi";
+        b.innerHTML = "<div class='k'>" + escapeHtml(c.k) + "</div><div class='v" + (c.bad ? " bad" : "") + "'>" + n(c.v) + "</div><div class='sub'>" + c.sub + "</div>";
+        b.addEventListener("click", c.go);
+        grid.appendChild(b);
+      });
+      document.getElementById("dashToday").innerHTML =
+        "<span><b>" + n(t.packedToday) + "</b>invoices packed</span><span><b>" + n(t.dispatchedToday) + "</b>dispatched</span><span><b>" + n(t.deliveredToday) + "</b>delivered</span>";
+
+      var body = document.getElementById("dashHubBody");
+      function cells(h, total) {
+        var c = function (v, warn) { return "<td class='num" + (warn && v ? " bad" : "") + "'>" + n(v) + "</td>"; };
+        return "<td>" + escapeHtml(h.name) + "</td>" + c(h.pend1) + c(h.pend2) + c(h.pend3, true) + c(h.waitingGateOut) + c(h.waitingDelivery) +
+          c(h.waiting3d, true) + c(h.mismatchInvoices) + c(h.requestedBookings, true) + c(h.openTickets, true) + c(h.packedToday) + c(h.dispatchedToday) + c(h.deliveredToday);
+      }
+      body.innerHTML = d.hubs.map(function (h) { return "<tr>" + cells(h) + "</tr>"; }).join("") +
+        "<tr class='total'>" + cells(Object.assign({ name: "All hubs" }, t)) + "</tr>";
+
+      var li = d.lastImport;
+      var stale = !li || istDay(li.createdAt) !== istToday();
+      var mini = [
+        ["Daily data", li ? [["Last upload", formatDateTime(li.createdAt)], ["By", li.by], ["Rows", n(li.rows)], ["New / updated", n(li.inserted) + " / " + n(li.updated)]] : [["Last upload", "None yet"]],
+          stale ? "<p class='field-error' style='margin:6px 0 0;'>No upload today yet.</p>" : ""],
+        ["Closed in the last 7 days", Object.keys(d.closures7d).map(function (k) { return [k, n(d.closures7d[k])]; }), ""],
+        ["Courier bookings", Object.keys(d.bookings).map(function (k) { return [k, n(d.bookings[k])]; }), ""],
+        ["Tickets", Object.keys(d.tickets).map(function (k) { return [k, n(d.tickets[k])]; }), ""],
+      ];
+      document.getElementById("dashMini").innerHTML = mini.map(function (m) {
+        return "<div class='card'><h2>" + escapeHtml(m[0]) + "</h2>" + m[1].map(function (r) {
+          return "<div class='row'><span>" + escapeHtml(r[0]) + "</span><b>" + escapeHtml(r[1]) + "</b></div>";
+        }).join("") + m[2] + "</div>";
+      }).join("");
+    }).catch(function (err) { document.getElementById("dashAsOf").textContent = ""; toast("Couldn't load the dashboard: " + err.message, true); });
+  }
+  document.getElementById("dashCsv").addEventListener("click", function () {
+    if (!dashData) return;
+    var keys = ["pend1", "pend2", "pend3", "waitingGateOut", "waitingDelivery", "waiting3d", "mismatchInvoices", "mismatchReturns", "requestedBookings", "openTickets", "packedToday", "dispatchedToday", "deliveredToday"];
+    downloadCsv("rtv-dashboard-" + istToday() + ".csv",
+      ["Hub", "To scan 1 day", "To scan 2 days", "To scan 3+ days", "Waiting gate-out", "Waiting delivery", "Waiting 3+ days", "Mismatch invoices", "Mismatch returns", "Courier requests", "Open tickets", "Packed today", "Dispatched today", "Delivered today"],
+      dashData.hubs.concat([Object.assign({ name: "All hubs" }, dashData.totals)]).map(function (h) { return [h.name].concat(keys.map(function (k) { return h[k]; })); }));
+  });
 
   // ================= pendency =================
   var PEND_BUCKETS = ["1 day", "2 days", "3+ days"];
@@ -4107,8 +4507,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         refreshViewHubSelect();
         refreshShippingFrom();
         renderBoxVendorPicker();
-        showPackShipmentsView();
+        if (isAdmin()) showDashboardView(); else showPackShipmentsView();
         refreshBookingBadge();
+        refreshTicketBadge();
       })
       .catch(function (err) {
         toast("Couldn't reach the server: " + err.message, true);
