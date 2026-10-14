@@ -191,6 +191,18 @@ body:not(.is-admin) .admin-only { display: none !important; }
 .stat-row b { font-size: 18px; font-weight: 800; margin-right: 4px; }
 .age-warn { color: var(--warn); font-weight: 700; }
 .age-bad { color: var(--bad); font-weight: 700; }
+.pend-grid { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 6px; }
+.pend-grid th { text-align: right; font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 2px solid var(--line); padding: 7px 10px; }
+.pend-grid th:first-child, .pend-grid td:first-child { text-align: left; }
+.pend-grid td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.pend-grid tr.total td { font-weight: 800; border-top: 2px solid var(--line); }
+.pend-count { font: inherit; font-weight: 700; font-variant-numeric: tabular-nums; background: none; border: none; color: var(--accent); cursor: pointer; padding: 2px 4px; border-radius: 5px; }
+.pend-count:hover { background: var(--zebra); }
+.pend-count.zero { color: var(--muted); font-weight: 400; cursor: default; }
+.pend-count.b3 { color: var(--bad); }
+.pill.b1 { color: var(--good); }
+.pill.b2 { color: var(--warn); }
+.pill.b3 { color: var(--bad); }
 .id-list { font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.7; }
 .deliver-form { display: grid; grid-template-columns: 160px 1fr 1fr auto; gap: 10px; align-items: end; }
 .deliver-form .field label { font-size: 11px; }
@@ -320,6 +332,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   </div>
   <div class="side-nav" id="topTabs" role="tablist" aria-orientation="vertical">
     <div class="side-nav-label">Shipments</div>
+    <button type="button" id="tabPendency" aria-selected="false">Pendency</button>
     <button type="button" id="tabPackShipments" aria-selected="true">Pack shipments</button>
     <button type="button" id="tabGateOut" aria-selected="false">Gate-out</button>
     <button type="button" id="tabDelivered" aria-selected="false">Mark delivered</button>
@@ -620,6 +633,41 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <div class="table-wrap">
       <table class="data-table"><thead><tr><th>Invoice No.</th><th>Brand</th><th>Delivered on</th><th>By</th><th>Proof of delivery</th></tr></thead><tbody id="deliveredRecentBody"></tbody></table>
     </div>
+  </div>
+</div>
+
+<div class="app-shell" id="pendencyView" style="display:none; max-width: 1240px;">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · to pack</p>
+      <h1>Pendency</h1>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Returns at the hub, not packed yet</h2>
+    <p class="hint">From the latest daily upload. Age counts from <b>Return Created At</b> for RTO and Home Trial returns, and from <b>Picked Up At</b> for all others. Returns already packed here, or shown dispatched / RTV delivered in the data, aren't counted. Click a number to see those returns.</p>
+    <div class="table-wrap"><table class="pend-grid"><thead><tr><th>Hub</th><th>1 day</th><th>2 days</th><th>3+ days</th><th>Total</th></tr></thead><tbody id="pendGridBody"></tbody></table></div>
+    <p class="hint" id="pendNote" style="margin:6px 0 0;"></p>
+  </div>
+  <div class="card">
+    <h2>Pending returns</h2>
+    <div class="table-toolbar">
+      <div class="stat-row" id="pendStats"></div>
+      <div class="actions">
+        <button type="button" class="link-btn" id="pendClear">Clear filters</button>
+        <button type="button" class="btn small secondary" id="pendCsv">Download CSV</button>
+      </div>
+    </div>
+    <div class="filter-bar">
+      <div class="field wide"><label for="pendSearch">Search</label><input id="pendSearch" placeholder="Return ID, SKU or seller…" autocomplete="off"></div>
+      <div class="field"><label for="pendHub">Hub</label><select id="pendHub"><option value="">All hubs</option></select></div>
+      <div class="field"><label for="pendBucket">Age</label><select id="pendBucket"><option value="">All</option><option value="1 day">1 day</option><option value="2 days">2 days</option><option value="3+ days">3+ days</option></select></div>
+      <div class="field"><label for="pendType">Return type</label><select id="pendType"><option value="">All types</option></select></div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>Return ID</th><th>SKU</th><th>Type</th><th>Seller</th><th>Hub</th><th>Clock started</th><th>Age</th><th>Bucket</th><th>Status</th></tr></thead><tbody id="pendBody"></tbody></table>
+    </div>
+    <p class="hint" id="pendMore" style="margin:8px 0 0;"></p>
   </div>
 </div>
 
@@ -2914,6 +2962,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     document.getElementById("tabDelivered").setAttribute("aria-selected", "false");
     document.getElementById("openShipmentsView").style.display = "none";
     document.getElementById("tabOpenShipments").setAttribute("aria-selected", "false");
+    document.getElementById("pendencyView").style.display = "none";
+    document.getElementById("tabPendency").setAttribute("aria-selected", "false");
     document.getElementById("toMarkDeliveredView").style.display = "none";
     document.getElementById("tabToMarkDelivered").setAttribute("aria-selected", "false");
     document.getElementById("tabPackShipments").setAttribute("aria-selected", "false");
@@ -3234,6 +3284,126 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     });
     tr.after(row);
   }
+
+  // ================= pendency =================
+  var PEND_BUCKETS = ["1 day", "2 days", "3+ days"];
+  var PEND_SHOW_MAX = 500;
+  var pendItems = [];
+  function showPendencyView() {
+    currentTabShow = showPendencyView;
+    hideAllTabViews();
+    document.getElementById("pendencyView").style.display = "block";
+    document.getElementById("tabPendency").setAttribute("aria-selected", "true");
+    loadPendency();
+  }
+  document.getElementById("tabPendency").addEventListener("click", showPendencyView);
+
+  function fillOptions(select, values, allLabel) {
+    var current = select.value;
+    select.innerHTML = "<option value=''>" + escapeHtml(allLabel) + "</option>" +
+      values.map(function (v) { return "<option>" + escapeHtml(v) + "</option>"; }).join("");
+    if (values.indexOf(current) !== -1) select.value = current;
+  }
+
+  function loadPendency() {
+    return getJson("/api/pendency").then(function (res) {
+      pendItems = res.items;
+      var hubs = Array.from(new Set(pendItems.map(function (it) { return it.hub; }))).sort();
+      fillOptions(document.getElementById("pendHub"), hubs, "All hubs");
+      fillOptions(document.getElementById("pendType"), Array.from(new Set(pendItems.map(function (it) { return it.returnType || "—"; }))).sort(), "All types");
+      document.getElementById("pendNote").textContent = res.notPickedUp
+        ? res.notPickedUp + " other return item" + (res.notPickedUp === 1 ? " hasn't" : "s haven't") + " been picked up yet (no Picked Up At), so they aren't counted."
+        : "";
+      renderPendGrid(hubs);
+      renderPendList();
+    }).catch(function (err) { toast("Couldn't load pendency: " + err.message, true); });
+  }
+
+  function renderPendGrid(hubs) {
+    var body = document.getElementById("pendGridBody");
+    body.innerHTML = "";
+    function countCell(hub, bucket, n, extraClass) {
+      var td = document.createElement("td");
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "pend-count " + (n ? extraClass || "" : "zero");
+      b.textContent = n.toLocaleString("en-IN");
+      if (n) b.addEventListener("click", function () {
+        document.getElementById("pendHub").value = hub || "";
+        document.getElementById("pendBucket").value = bucket || "";
+        renderPendList();
+        document.getElementById("pendSearch").scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+      td.appendChild(b);
+      return td;
+    }
+    function addRow(label, hubFilter, rows, isTotal) {
+      var tr = document.createElement("tr");
+      if (isTotal) tr.className = "total";
+      var first = document.createElement("td");
+      first.textContent = label;
+      tr.appendChild(first);
+      PEND_BUCKETS.forEach(function (bk, i) {
+        tr.appendChild(countCell(hubFilter, bk, rows.filter(function (it) { return it.bucket === bk; }).length, i === 2 ? "b3" : ""));
+      });
+      tr.appendChild(countCell(hubFilter, "", rows.length));
+      body.appendChild(tr);
+    }
+    hubs.forEach(function (h) { addRow(h, h, pendItems.filter(function (it) { return it.hub === h; })); });
+    if (hubs.length > 1) addRow("All hubs", "", pendItems, true);
+    if (!hubs.length) body.innerHTML = "<tr><td colspan='5' class='empty-state'>Nothing pending — every return in the daily data is packed.</td></tr>";
+  }
+
+  function filteredPend() {
+    var q = document.getElementById("pendSearch").value.trim().toLowerCase();
+    var hub = document.getElementById("pendHub").value;
+    var bk = document.getElementById("pendBucket").value;
+    var type = document.getElementById("pendType").value;
+    return pendItems.filter(function (it) {
+      if (hub && it.hub !== hub) return false;
+      if (bk && it.bucket !== bk) return false;
+      if (type && (it.returnType || "—") !== type) return false;
+      return !q || [it.returnId, it.sku, it.seller, it.forwardId].some(function (x) { return x && x.toLowerCase().indexOf(q) !== -1; });
+    });
+  }
+
+  function ageText(hours) {
+    if (hours < 1) return Math.max(1, Math.round(hours * 60)) + " min";
+    if (hours < 48) return Math.round(hours) + " h";
+    return (hours / 24).toFixed(1) + " days";
+  }
+
+  function renderPendList() {
+    var rows = filteredPend();
+    var returns = new Set(rows.map(function (it) { return it.returnId; })).size;
+    document.getElementById("pendStats").innerHTML = "<span><b>" + rows.length.toLocaleString("en-IN") + "</b>items</span>" +
+      "<span><b>" + returns.toLocaleString("en-IN") + "</b>returns</span>" +
+      "<span><b>" + rows.filter(function (it) { return it.bucket === "3+ days"; }).length.toLocaleString("en-IN") + "</b>3+ days</span>";
+    var body = document.getElementById("pendBody");
+    body.innerHTML = rows.slice(0, PEND_SHOW_MAX).map(function (it) {
+      var cls = it.bucket === "1 day" ? "b1" : it.bucket === "2 days" ? "b2" : "b3";
+      return "<tr><td class='mono'>" + escapeHtml(it.returnId) + "</td><td class='mono'>" + escapeHtml(it.sku) + "</td><td>" + escapeHtml(it.returnType) + "</td>" +
+        "<td>" + escapeHtml(it.seller) + "</td><td>" + escapeHtml(it.hub) + "</td>" +
+        "<td>" + escapeHtml(formatDateTime(it.clockStart)) + "<div class='hint' style='margin:0;'>" + escapeHtml(it.clockColumn) + "</div></td>" +
+        "<td>" + escapeHtml(ageText(it.ageHours)) + "</td><td><span class='pill " + cls + "'>" + escapeHtml(it.bucket) + "</span></td>" +
+        "<td>" + escapeHtml(it.returnStatus || "") + "</td></tr>";
+    }).join("") || "<tr><td colspan='9' class='empty-state'>" + (pendItems.length ? "Nothing matches these filters." : "Nothing pending.") + "</td></tr>";
+    document.getElementById("pendMore").textContent = rows.length > PEND_SHOW_MAX
+      ? "Showing the oldest " + PEND_SHOW_MAX + " of " + rows.length.toLocaleString("en-IN") + " — narrow the filters, or download the CSV for all of them." : "";
+  }
+  ["pendSearch", "pendHub", "pendBucket", "pendType"].forEach(function (id) {
+    document.getElementById(id).addEventListener(id === "pendSearch" ? "input" : "change", renderPendList);
+  });
+  document.getElementById("pendClear").addEventListener("click", function () {
+    clearFilters(["pendSearch", "pendHub", "pendBucket", "pendType"], renderPendList);
+  });
+  document.getElementById("pendCsv").addEventListener("click", function () {
+    downloadCsv("rtv-pendency-" + istToday() + ".csv",
+      ["Return Tracking ID", "SKU", "Forward Tracking ID", "Return Type", "Seller", "Return Location", "Hub", "Clock started", "Clock column", "Age (hours)", "Bucket", "Return Status", "Sale Price"],
+      filteredPend().map(function (it) {
+        return [it.returnId, it.sku, it.forwardId, it.returnType, it.seller, it.returnLocation, it.hub, it.clockStart, it.clockColumn, it.ageHours, it.bucket, it.returnStatus, it.salePrice];
+      }));
+  });
 
   // ================= open shipments =================
   var openRows = [];

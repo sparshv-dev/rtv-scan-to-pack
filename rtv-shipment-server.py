@@ -1206,6 +1206,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.lookup_tracking(tracking)
             if path == "/api/shipments":
                 return self.list_shipments()
+            if path == "/api/pendency":
+                return self.list_pendency()
             if path == "/api/shipments/open":
                 return self.list_open_shipments()
             if path == "/api/shipments/to-mark-delivered":
@@ -1913,6 +1915,62 @@ class Handler(BaseHTTPRequestHandler):
         conn.commit()
         conn.close()
         self.send_json(200, {"trackingFrom": value})
+
+    # Returns in the daily data that are at the hub but not packed in the app
+    # yet. The clock starts at Return Created At for RTO / Home Trial returns
+    # and at Picked Up At for everything else (no pickup yet = not at the hub,
+    # so not pending). Returns the data already shows dispatched or RTV
+    # delivered are left out.
+    PENDENCY_SQL = """
+        WITH r AS (
+            SELECT r.*,
+                   CASE WHEN r.return_type ILIKE 'rto%%' OR r.return_type ILIKE '%%home trial%%'
+                        THEN r.return_created_at ELSE r.picked_up_at END AS clock_start,
+                   CASE WHEN r.return_type ILIKE 'rto%%' OR r.return_type ILIKE '%%home trial%%'
+                        THEN 'Return Created At' ELSE 'Picked Up At' END AS clock_column
+            FROM returns r
+            WHERE r.dispatched_at IS NULL AND r.rtv_delivered_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM shipment_items si
+                  WHERE si.tracking_id = r.return_tracking_id AND (si.sku IS NULL OR si.sku = r.sku)
+              )
+        )
+        SELECT r.return_tracking_id, r.sku, r.forward_tracking_id, r.return_type, r.return_status,
+               r.rtv_shipment_status, r.sale_price, r.seller_name, r.return_location_name,
+               r.hub_id, COALESCE(h.name, r.hub_name) AS hub, r.clock_start, r.clock_column,
+               EXTRACT(EPOCH FROM (now() - r.clock_start)) / 3600.0 AS age_hours
+        FROM r LEFT JOIN hubs h ON h.id = r.hub_id
+    """
+
+    def list_pendency(self):
+        scoped = self.scope_hub_id()
+        where, params = "", []
+        if scoped is not None:
+            where, params = " WHERE r.hub_id = %s", [scoped]
+        conn = get_db()
+        rows = conn.execute(self.PENDENCY_SQL + where, tuple(params)).fetchall()
+        conn.close()
+
+        def bucket(hours):
+            return "1 day" if hours < 24 else "2 days" if hours < 48 else "3+ days"
+
+        items, not_picked_up = [], 0
+        for r in rows:
+            if r["clock_start"] is None:
+                not_picked_up += 1
+                continue
+            hours = float(r["age_hours"])
+            items.append({
+                "returnId": r["return_tracking_id"], "sku": r["sku"], "forwardId": r["forward_tracking_id"],
+                "returnType": r["return_type"], "returnStatus": r["return_status"],
+                "rtvStatus": r["rtv_shipment_status"], "salePrice": float(r["sale_price"] or 0),
+                "seller": r["seller_name"], "returnLocation": r["return_location_name"],
+                "hubId": r["hub_id"], "hub": r["hub"] or "Hub not matched",
+                "clockStart": r["clock_start"].isoformat(), "clockColumn": r["clock_column"],
+                "ageHours": round(hours, 1), "bucket": bucket(hours),
+            })
+        items.sort(key=lambda x: -x["ageHours"])
+        self.send_json(200, {"items": items, "notPickedUp": not_picked_up})
 
     # Packed-but-not-dispatched and dispatched-but-not-delivered invoices
     # from the tracking start date on, oldest first (the ones to chase).
