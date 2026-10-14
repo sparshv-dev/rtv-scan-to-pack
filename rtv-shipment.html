@@ -323,8 +323,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <button type="button" id="tabPackShipments" aria-selected="true">Pack shipments</button>
     <button type="button" id="tabGateOut" aria-selected="false">Gate-out</button>
     <button type="button" id="tabDelivered" aria-selected="false">Mark delivered</button>
-    <button type="button" id="tabOpenShipments" aria-selected="false">Open shipments</button>
-    <button type="button" id="tabToMarkDelivered" aria-selected="false">To be marked delivered</button>
+    <button type="button" id="tabOpenShipments" aria-selected="false">Pending Dispatch &amp; Delivery</button>
+    <button type="button" id="tabToMarkDelivered" aria-selected="false">Delivery mismatch (App vs HMS)</button>
     <button type="button" id="tabShipmentArchive" aria-selected="false">Shipment archive</button>
     <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings</button>
     <div class="side-nav-label admin-only">Admin</div>
@@ -627,7 +627,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   <div class="app-head">
     <div>
       <p class="eyebrow">Return to Vendor · follow-up</p>
-      <h1>Open shipments</h1>
+      <h1>Pending Dispatch &amp; Delivery</h1>
     </div>
   </div>
   <div class="card">
@@ -662,12 +662,12 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   <div class="app-head">
     <div>
       <p class="eyebrow">Return to Vendor · follow-up</p>
-      <h1>To be marked delivered</h1>
+      <h1>Delivery mismatch (App vs HMS)</h1>
     </div>
   </div>
   <div class="card">
-    <h2>Delivered here, not yet in the daily data</h2>
-    <p class="hint">These invoices are marked delivered in this app, but the latest daily upload still has no <b>RTV Delivered At</b> for the returns listed. Mark those returns delivered in the source system — each one drops off this list after the next daily upload shows it delivered.</p>
+    <h2>Delivered in the app, not yet delivered in HMS</h2>
+    <p class="hint">These invoices are marked delivered in this app, but the latest daily upload still has no <b>RTV Delivered At</b> for the returns listed. Mark those returns delivered in HMS — each one drops off this list after the next daily upload shows it delivered.</p>
     <div class="table-toolbar">
       <div class="stat-row" id="tmdStats"></div>
       <div class="actions">
@@ -3261,7 +3261,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       document.getElementById("openHint").textContent = "Invoices packed from " + formatDate(res.trackingFrom) +
         " on. Waiting is time since packing (for gate-out) or since dispatch (for delivery); amber is a day or more, red three days or more.";
       renderOpenShipments();
-    }).catch(function (err) { toast("Couldn't load open shipments: " + err.message, true); });
+    }).catch(function (err) { toast("Couldn't load pending dispatch & delivery: " + err.message, true); });
   }
 
   function filteredOpen() {
@@ -3311,7 +3311,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     clearFilters(["osSearch", "osStatus", "osLoc", "osAge", "osFrom", "osTo"], renderOpenShipments);
   });
   document.getElementById("osCsv").addEventListener("click", function () {
-    downloadCsv("rtv-open-shipments-" + istToday() + ".csv",
+    downloadCsv("rtv-pending-dispatch-delivery-" + istToday() + ".csv",
       ["Invoice No.", "Ship date", "Hub", "Brand", "Return location", "Boxes", "Units", "Amount", "Status", "Waiting since", "Days waiting", "Dispatched by"],
       filteredOpen().map(function (s) {
         return [s.invoiceNo, s.shipDate, s.hubName, brandLabel(s), s.returnLocation || "Not set", s.boxes, s.units, Number(s.amount || 0).toFixed(2),
@@ -3413,7 +3413,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
           it.inData ? "In daily data, not delivered" : "Not in daily data", it.dataStatus || ""]);
       });
     });
-    downloadCsv("rtv-to-mark-delivered-" + istToday() + ".csv",
+    downloadCsv("rtv-delivery-mismatch-app-vs-hms-" + istToday() + ".csv",
       ["Invoice No.", "Hub", "Brand", "Delivered on (app)", "Return Tracking ID", "SKU", "Box", "Daily data", "Status in data"], out);
   });
 
