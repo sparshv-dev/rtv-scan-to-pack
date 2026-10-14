@@ -209,6 +209,12 @@ body:not(.is-admin) .admin-only { display: none !important; }
 @media (max-width: 820px) { .close-bar { grid-template-columns: 1fr; } }
 .data-table td.pick, .data-table th.pick { width: 28px; }
 .pill.reason { color: var(--bad); }
+.nav-badge { display: inline-block; min-width: 20px; padding: 1px 6px; margin-left: 6px; border-radius: 999px; background: var(--bad); color: #fff; font-size: 11px; font-weight: 800; text-align: center; }
+.nav-badge:empty { display: none; }
+.pill.st-Requested { color: var(--bad); }
+.pill.st-Shared { color: var(--accent); }
+.pill.st-Picked, .pill.st-In { color: var(--warn); }
+.pill.st-Delivered { color: var(--good); }
 .id-list { font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.7; }
 .deliver-form { display: grid; grid-template-columns: 160px 1fr 1fr auto; gap: 10px; align-items: end; }
 .deliver-form .field label { font-size: 11px; }
@@ -345,7 +351,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <button type="button" id="tabOpenShipments" aria-selected="false">Pending Dispatch &amp; Delivery</button>
     <button type="button" id="tabToMarkDelivered" aria-selected="false">Delivery mismatch (App vs HMS)</button>
     <button type="button" id="tabShipmentArchive" aria-selected="false">Shipment archive</button>
-    <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings</button>
+    <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings<span class="nav-badge" id="cbNavBadge" title="Bookings waiting to be shared with DTDC"></span></button>
     <div class="side-nav-label admin-only">Admin</div>
     <button type="button" id="tabDailyData" class="admin-only" aria-selected="false">Daily data</button>
     <button type="button" id="tabBrands" class="admin-only" aria-selected="false">Brands</button>
@@ -544,7 +550,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 
   <div class="card">
     <h2>New booking</h2>
-    <p class="hint">Search and pick one or more invoices going to the same store, then fill in the pickup details for DTDC. Once an invoice is used here, it won't show up again for a future booking.</p>
+    <p class="hint">Search and pick one or more invoices going to the same store, then fill in the pickup details. The booking goes to the admin as <b>Requested</b>; once they share it with DTDC its status changes here. Gate-out and delivery of its invoices move it to Picked up and Delivered automatically. An invoice used here won't show up again for a future booking.</p>
 
     <div class="field">
       <label for="cbInvoiceSearch">Search invoices</label>
@@ -571,26 +577,23 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   </div>
 
   <div class="card">
-    <div style="display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap;">
-      <h2>Bookings</h2>
-      <a href="/api/courier-bookings/export" class="link-btn" id="cbExportBtn" download>Export CSV (DTDC format)</a>
+    <h2>Bookings</h2>
+    <p class="hint admin-only">To send DTDC the new requests: filter <b>Requested</b> → <b>Export CSV (DTDC format)</b> → share the file → <b>Mark shown as Shared with DTDC</b>. Export downloads whatever the filters match.</p>
+    <div class="table-toolbar">
+      <div class="stat-row" id="cbStats"></div>
+      <div class="actions">
+        <button type="button" class="link-btn" id="cbClear">Clear filters</button>
+        <button type="button" class="btn small secondary admin-only" id="cbShareShown">Mark shown as Shared with DTDC</button>
+        <a href="/api/courier-bookings/export" class="btn small secondary" id="cbExportBtn" download style="text-decoration:none;">Export CSV (DTDC format)</a>
+      </div>
     </div>
-    <p class="hint" style="margin:-4px 0 14px;">Export downloads whatever the search and status filter below currently match — clear both to export everything.</p>
-    <div class="field-grid" style="grid-template-columns: 2fr 1fr; margin-bottom:14px;">
-      <div class="field">
-        <label for="cbBookingsSearch">Search bookings</label>
-        <input id="cbBookingsSearch" placeholder="Invoice, brand, store, destination or tracking…" autocomplete="off">
-      </div>
-      <div class="field">
-        <label for="cbBookingsStatusFilter">Filter by status</label>
-        <select id="cbBookingsStatusFilter">
-          <option value="">All statuses</option>
-        </select>
-      </div>
+    <div class="filter-bar">
+      <div class="field wide"><label for="cbBookingsSearch">Search</label><input id="cbBookingsSearch" placeholder="Invoice, brand, store, destination, hub or tracking…" autocomplete="off"></div>
+      <div class="field"><label for="cbBookingsStatusFilter">Status</label><select id="cbBookingsStatusFilter"><option value="">All statuses</option></select></div>
     </div>
     <div class="table-wrap">
       <table class="data-table">
-        <thead><tr><th>Pickup date</th><th>Brand</th><th>Store</th><th>Destination name</th><th class="num-col">Boxes</th><th class="num-col">Declared price</th><th class="num-col">Weight (KG)</th><th>Invoice(s)</th><th>Status</th><th>Tracking</th><th>Report</th><th></th></tr></thead>
+        <thead><tr><th>Pickup date</th><th>Hub</th><th>Brand</th><th>Store</th><th>Destination name</th><th class="num-col">Boxes</th><th class="num-col">Declared price</th><th class="num-col">Weight (KG)</th><th>Invoice(s)</th><th>Status</th><th>Tracking</th><th>Report</th><th></th></tr></thead>
         <tbody id="cbBookingsBody"></tbody>
       </table>
     </div>
@@ -2695,7 +2698,16 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   var cbSelectedShipments = []; // [{id, invoiceNo, vendorId, vendorName, boxes, amount, shipDate}]
   var cbLoaded = false;
   // Kept in sync by hand with COURIER_BOOKING_STATUSES in rtv-shipment-server.py.
-  var COURIER_BOOKING_STATUSES = ["Shared with DTDC", "Picked up from store", "In Transit", "Delivered to Brand"];
+  var COURIER_BOOKING_STATUSES = ["Requested", "Shared with DTDC", "Picked up from store", "In Transit", "Delivered to Brand"];
+
+  // Bookings waiting for an admin to share them with DTDC — badge on the sidebar.
+  function refreshBookingBadge() {
+    if (!state.me) return;
+    getJson("/api/courier-bookings/requested-count")
+      .then(function (r) { document.getElementById("cbNavBadge").textContent = isAdmin() && r.requested ? String(r.requested) : ""; })
+      .catch(function () {});
+  }
+  setInterval(refreshBookingBadge, 120000);
 
   function cbRenderSelected() {
     var wrap = document.getElementById("cbSelectedInvoices");
@@ -2825,7 +2837,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       destinationName: destinationName,
       pickupDate: pickupDate, boxes: boxes, declaredPrice: declaredPrice, weightKg: weightKg,
     }).then(function (created) {
-      toast("Courier booking created — downloading its report");
+      toast("Booking requested — downloading its report");
+      refreshBookingBadge();
       cbSelectedShipments = [];
       cbRenderSelected();
       cbRecomputeFields();
@@ -2855,19 +2868,33 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     return getJson("/api/courier-bookings").then(function (bookings) {
       cbAllBookings = bookings;
       cbRenderBookingRows();
+      refreshBookingBadge();
     }).catch(function (err) { toast("Couldn't load bookings: " + err.message, true); });
+  }
+
+  function cbFilteredBookings() {
+    var q = document.getElementById("cbBookingsSearch").value.trim().toLowerCase();
+    var statusFilter = document.getElementById("cbBookingsStatusFilter").value;
+    return cbAllBookings.filter(function (b) {
+      if (statusFilter && b.status !== statusFilter) return false;
+      if (!q) return true;
+      return [b.pickupDate, b.vendorName, b.destinationName, b.invoiceNumbers, b.status, b.tracking, b.hubName].some(
+        function (v) { return v && String(v).toLowerCase().indexOf(q) !== -1; }
+      );
+    });
   }
 
   function cbRenderBookingRows() {
     var q = document.getElementById("cbBookingsSearch").value.trim().toLowerCase();
     var statusFilter = document.getElementById("cbBookingsStatusFilter").value;
-    var bookings = cbAllBookings.filter(function (b) {
-      if (statusFilter && b.status !== statusFilter) return false;
-      if (!q) return true;
-      return [b.pickupDate, b.vendorName, b.destinationName, b.invoiceNumbers, b.status, b.tracking].some(
-        function (v) { return v && String(v).toLowerCase().indexOf(q) !== -1; }
-      );
-    });
+    var bookings = cbFilteredBookings();
+    document.getElementById("cbStats").innerHTML = COURIER_BOOKING_STATUSES.map(function (st) {
+      return "<span><b>" + cbAllBookings.filter(function (b) { return b.status === st; }).length + "</b>" + escapeHtml(st) + "</span>";
+    }).join("");
+    var requestedShown = bookings.filter(function (b) { return b.status === "Requested"; }).length;
+    var shareBtn = document.getElementById("cbShareShown");
+    shareBtn.disabled = !requestedShown;
+    shareBtn.textContent = requestedShown ? "Mark " + requestedShown + " requested as Shared with DTDC" : "Mark shown as Shared with DTDC";
     var body = document.getElementById("cbBookingsBody");
     body.innerHTML = "";
     document.getElementById("cbBookingsEmpty").style.display = bookings.length ? "none" : "block";
@@ -2876,6 +2903,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         var tr = document.createElement("tr");
         tr.innerHTML =
           "<td>" + escapeHtml(b.pickupDate) + "</td>" +
+          "<td>" + escapeHtml(b.hubName || "") + "</td>" +
           "<td>" + escapeHtml(brandPrefix(b.vendorName)) + "</td>" +
           "<td>" + escapeHtml(b.vendorName) + "</td>" +
           "<td>" + escapeHtml(b.destinationName || "") + "</td>" +
@@ -2888,7 +2916,11 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
           "<td></td>" +
           "<td></td>";
 
-        var statusCell = tr.children[8];
+        var statusCell = tr.children[9];
+        if (!isAdmin()) {
+          // Hubs see the status; only admins change it.
+          statusCell.innerHTML = "<span class='pill st-" + escapeHtml(b.status.split(" ")[0]) + "'>" + escapeHtml(b.status) + "</span>";
+        } else {
         var statusSelect = document.createElement("select");
         statusSelect.style.width = "170px";
         COURIER_BOOKING_STATUSES.forEach(function (opt) {
@@ -2901,20 +2933,23 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         statusSelect.addEventListener("change", function () {
           var previous = b.status;
           var next = statusSelect.value;
-          fetch("/api/courier-bookings/" + b.id, {
+          fetchJson("/api/courier-bookings/" + b.id, {
             method: "PATCH", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ status: next }),
           })
-            .then(function (res) { if (!res.ok) throw new Error("Request failed (" + res.status + ")"); })
-            .then(function () { b.status = next; toast("Status updated"); })
+            .then(function () { b.status = next; toast("Status updated"); cbRenderBookingRows(); refreshBookingBadge(); })
             .catch(function (err) {
               statusSelect.value = previous;
               toast("Couldn't update status: " + err.message, true);
             });
         });
         statusCell.appendChild(statusSelect);
+        }
 
-        var trackingCell = tr.children[9];
+        var trackingCell = tr.children[10];
+        if (!isAdmin()) {
+          trackingCell.innerHTML = b.tracking ? "<span class='mono'>" + escapeHtml(b.tracking) + "</span>" : "<span class='hint' style='margin:0;'>Not yet</span>";
+        } else {
         var trackingInput = document.createElement("input");
         trackingInput.type = "text";
         trackingInput.value = b.tracking || "";
@@ -2936,27 +2971,32 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         });
         trackingCell.appendChild(trackingInput);
         trackingCell.appendChild(saveTrackingBtn);
+        }
 
         var reportLink = document.createElement("a");
         reportLink.href = "/api/courier-bookings/" + b.id + "/report";
         reportLink.className = "link-btn";
         reportLink.textContent = "Download CSV";
         reportLink.setAttribute("download", "");
-        tr.children[10].appendChild(reportLink);
+        tr.children[11].appendChild(reportLink);
 
-        var delBtn = document.createElement("button");
-        delBtn.type = "button";
-        delBtn.className = "row-del";
-        delBtn.title = "Delete booking (frees its invoices for rebooking)";
-        delBtn.textContent = "✕";
-        delBtn.addEventListener("click", function () {
-          if (!window.confirm("Delete this courier booking? Its invoice(s) become bookable again.")) return;
-          fetch("/api/courier-bookings/" + b.id, { method: "DELETE" })
-            .then(function (res) { if (!res.ok) throw new Error("Request failed (" + res.status + ")"); return cbRenderBookings(); })
-            .then(function () { toast("Booking deleted"); })
-            .catch(function (err) { toast("Couldn't delete: " + err.message, true); });
-        });
-        tr.lastElementChild.appendChild(delBtn);
+        // Admins can delete any booking; a hub can cancel its own while it's
+        // still only Requested (not yet with DTDC).
+        if (isAdmin() || b.status === "Requested") {
+          var delBtn = document.createElement("button");
+          delBtn.type = "button";
+          delBtn.className = isAdmin() ? "row-del" : "link-btn";
+          delBtn.title = "Delete booking (frees its invoices for rebooking)";
+          delBtn.textContent = isAdmin() ? "✕" : "Cancel";
+          delBtn.addEventListener("click", function () {
+            if (!window.confirm((isAdmin() ? "Delete" : "Cancel") + " this courier booking? Its invoice(s) become bookable again.")) return;
+            fetchJson("/api/courier-bookings/" + b.id, { method: "DELETE" })
+              .then(function () { return cbRenderBookings(); })
+              .then(function () { toast(isAdmin() ? "Booking deleted" : "Booking cancelled"); })
+              .catch(function (err) { toast("Couldn't delete: " + err.message, true); });
+          });
+          tr.lastElementChild.appendChild(delBtn);
+        }
         body.appendChild(tr);
       });
   }
@@ -2972,6 +3012,17 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     });
   })();
   document.getElementById("cbBookingsStatusFilter").addEventListener("change", cbRenderBookingRows);
+  document.getElementById("cbClear").addEventListener("click", function () {
+    clearFilters(["cbBookingsSearch", "cbBookingsStatusFilter"], cbRenderBookingRows);
+  });
+  document.getElementById("cbShareShown").addEventListener("click", function () {
+    var ids = cbFilteredBookings().filter(function (b) { return b.status === "Requested"; }).map(function (b) { return b.id; });
+    if (!ids.length) return;
+    if (!window.confirm("Mark " + ids.length + " requested booking" + (ids.length === 1 ? "" : "s") + " as Shared with DTDC? Export the DTDC file first if you haven't.")) return;
+    postJson("/api/courier-bookings/share", { ids: ids })
+      .then(function (r) { toast(r.shared + " booking" + (r.shared === 1 ? "" : "s") + " shared with DTDC"); return cbRenderBookings(); })
+      .catch(function (err) { toast(err.message, true); });
+  });
 
   document.getElementById("cbExportBtn").addEventListener("click", function (e) {
     e.preventDefault();
@@ -3016,7 +3067,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     hideAllTabViews();
     document.getElementById("courierBookingsView").style.display = "block";
     document.getElementById("tabCourierBookings").setAttribute("aria-selected", "true");
-    if (!cbLoaded) { cbLoaded = true; cbRenderBookings(); }
+    // Always reload: statuses change from elsewhere (admin sharing, gate-out, delivery).
+    cbLoaded = true;
+    cbRenderBookings();
   }
   function showPackShipmentsView() {
     currentTabShow = showPackShipmentsView;
@@ -4036,6 +4089,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         applyMe(me);
         refreshShippingFrom();
         cbLoaded = false;
+        refreshBookingBadge();
         if (currentTabShow) currentTabShow();
       })
       .catch(function (err) { toast("Couldn't switch hub: " + err.message, true); });
@@ -4054,6 +4108,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         refreshShippingFrom();
         renderBoxVendorPicker();
         showPackShipmentsView();
+        refreshBookingBadge();
       })
       .catch(function (err) {
         toast("Couldn't reach the server: " + err.message, true);

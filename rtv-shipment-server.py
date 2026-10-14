@@ -392,6 +392,7 @@ def init_db():
         ALTER TABLE courier_bookings ADD COLUMN IF NOT EXISTS destination_name TEXT;
         ALTER TABLE courier_bookings ADD COLUMN IF NOT EXISTS tracking TEXT;
         ALTER TABLE courier_bookings ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'Shared with DTDC';
+        ALTER TABLE courier_bookings ADD COLUMN IF NOT EXISTS created_by TEXT;
         CREATE TABLE IF NOT EXISTS courier_booking_shipments (
             booking_id INTEGER NOT NULL REFERENCES courier_bookings(id) ON DELETE CASCADE,
             shipment_id INTEGER NOT NULL REFERENCES shipments(id) UNIQUE,
@@ -854,8 +855,11 @@ COURIER_BOOKING_CONSTANTS = {
 
 # The lifecycle a booking moves through after it's created — fixed list, not
 # stored anywhere else, so the frontend's dropdown and this validation stay
-# hand in sync.
+# hand in sync. A hub raises a booking as Requested; an admin shares it with
+# DTDC; gate-out and delivery of every invoice on it move it to Picked up /
+# Delivered automatically (see sync_booking_status).
 COURIER_BOOKING_STATUSES = [
+    "Requested",
     "Shared with DTDC",
     "Picked up from store",
     "In Transit",
@@ -892,6 +896,7 @@ def courier_booking_to_dict(row):
         "invoiceNumbers": row["invoice_numbers"],
         "tracking": row["tracking"],
         "status": row["status"],
+        "createdBy": row.get("created_by"),
         "destinationName": row["destination_name"],
         "destinationPincode": row["vendor_pincode"],
         "destinationPhone": row["vendor_contact_phone"],
@@ -980,6 +985,40 @@ def upload_pod_to_drive(data, mime_type, filename, month):
     if not reply.get("ok"):
         raise ApiError(502, "Google Drive refused the photo: " + str(reply.get("error")))
     return reply.get("id"), reply.get("url")
+
+
+def sync_booking_status(conn, shipment_id):
+    """After a gate-out, undo or delivery: bring the courier booking holding
+    this invoice in line. Every invoice delivered -> Delivered to Brand;
+    every invoice dispatched -> Picked up from store; a pickup undone ->
+    back to Shared with DTDC. Manual statuses further along are kept."""
+    b = conn.execute(
+        """
+        SELECT b.id, b.status,
+               bool_and(s.dispatched_at IS NOT NULL) AS all_dispatched,
+               bool_and(s.delivered_at IS NOT NULL) AS all_delivered
+        FROM courier_booking_shipments x
+        JOIN courier_bookings b ON b.id = x.booking_id
+        JOIN courier_booking_shipments y ON y.booking_id = b.id
+        JOIN shipments s ON s.id = y.shipment_id
+        WHERE x.shipment_id = %s
+        GROUP BY b.id, b.status
+        """,
+        (shipment_id,),
+    ).fetchone()
+    if not b:
+        return
+    status = b["status"]
+    if b["all_delivered"]:
+        new = "Delivered to Brand"
+    elif b["all_dispatched"]:
+        new = status if status in ("Picked up from store", "In Transit") else "Picked up from store"
+    elif status == "Picked up from store":
+        new = "Shared with DTDC"
+    else:
+        new = status
+    if new != status:
+        conn.execute("UPDATE courier_bookings SET status = %s WHERE id = %s", (new, b["id"]))
 
 
 class ApiError(Exception):
@@ -1243,6 +1282,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.list_bookable_shipments(q)
             if path == "/api/courier-bookings":
                 return self.list_courier_bookings()
+            if path == "/api/courier-bookings/requested-count":
+                return self.requested_bookings_count()
             if path == "/api/courier-bookings/export":
                 status_filter = (qs.get("status") or [""])[0].strip()
                 q_filter = (qs.get("q") or [""])[0].strip()
@@ -1307,6 +1348,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.save_email_template()
             if path == "/api/courier-bookings":
                 return self.create_courier_booking()
+            if path == "/api/courier-bookings/share":
+                return self.share_courier_bookings()
             return self.send_json(404, {"error": "Unknown endpoint"})
         except ApiError as e:
             self.send_json(e.status, {"error": e.message})
@@ -2175,6 +2218,8 @@ class Handler(BaseHTTPRequestHandler):
             "UPDATE shipments SET dispatched_at = %s, dispatched_by = %s WHERE id = %s AND dispatched_at IS NULL RETURNING id",
             (now, user["username"], row["id"]),
         ).fetchone()
+        if updated:
+            sync_booking_status(conn, row["id"])
         conn.commit()
         if not updated:
             conn.close()
@@ -2197,6 +2242,7 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
             raise ApiError(409, "Not dispatched yet")
         conn.execute("UPDATE shipments SET dispatched_at = NULL, dispatched_by = NULL WHERE id = %s", (shipment_id,))
+        sync_booking_status(conn, shipment_id)
         conn.commit()
         conn.close()
         self.send_json(200, {"id": shipment_id, "status": "Packed"})
@@ -2255,6 +2301,8 @@ class Handler(BaseHTTPRequestHandler):
             "pod_url = %s, pod_file_id = %s WHERE id = %s AND delivered_at IS NULL RETURNING id",
             (delivered_on, datetime.now(timezone.utc).isoformat(), user["username"], note, pod_url, file_id, shipment_id),
         ).fetchone()
+        if updated:
+            sync_booking_status(conn, shipment_id)
         conn.commit()
         row = self.find_scoped_shipment(conn, shipment_id=shipment_id)
         conn.close()
@@ -2407,7 +2455,7 @@ class Handler(BaseHTTPRequestHandler):
         rows = conn.execute(
             """
             SELECT b.id, b.pickup_date, b.boxes, b.declared_price, b.weight_kg, b.created_at,
-                   b.destination_name, b.tracking, b.status,
+                   b.destination_name, b.tracking, b.status, b.created_by,
                    v.name AS vendor_name, v.warehouse_label, v.pincode AS vendor_pincode,
                    v.contact_phone AS vendor_contact_phone, v.address AS vendor_address,
                    h.name AS hub_name, h.pincode AS hub_pincode, h.contact_name AS hub_contact_name,
@@ -2429,6 +2477,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(200, [courier_booking_to_dict(r) for r in rows])
 
     def create_courier_booking(self):
+        user = self.require_user()
         body = self.read_json_body()
         shipment_ids = body.get("shipmentIds")
         if not isinstance(shipment_ids, list) or not shipment_ids:
@@ -2482,9 +2531,9 @@ class Handler(BaseHTTPRequestHandler):
 
         created_at = datetime.now(timezone.utc).isoformat()
         booking_row = conn.execute(
-            "INSERT INTO courier_bookings (vendor_id, hub_id, destination_name, pickup_date, boxes, declared_price, weight_kg, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (vendor_id, hub_id, destination_name, pickup_date, boxes, declared_price, weight_kg, created_at),
+            "INSERT INTO courier_bookings (vendor_id, hub_id, destination_name, pickup_date, boxes, declared_price, weight_kg, created_at, status, created_by) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Requested', %s) RETURNING id",
+            (vendor_id, hub_id, destination_name, pickup_date, boxes, declared_price, weight_kg, created_at, user["username"]),
         ).fetchone()
         booking_id = booking_row["id"]
         conn.executemany(
@@ -2496,18 +2545,49 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(201, {"id": booking_id})
 
     def delete_courier_booking(self, booking_id):
+        user = self.require_user()
         hub_sql, hub_params = self.hub_filter("hub_id")
         conn = get_db()
-        row = conn.execute("SELECT id FROM courier_bookings WHERE id = %s" + hub_sql, (booking_id, *hub_params)).fetchone()
+        row = conn.execute("SELECT id, status FROM courier_bookings WHERE id = %s" + hub_sql, (booking_id, *hub_params)).fetchone()
         if not row:
             conn.close()
             raise ApiError(404, "Booking not found")
+        if user["role"] != "admin" and row["status"] != "Requested":
+            conn.close()
+            raise ApiError(403, "This booking is already with DTDC — ask an admin to cancel it")
         conn.execute("DELETE FROM courier_bookings WHERE id = %s", (booking_id,))
         conn.commit()
         conn.close()
         self.send_json(200, {"id": booking_id})
 
+    def share_courier_bookings(self):
+        self.require_admin()
+        ids = self.read_json_body().get("ids")
+        if not isinstance(ids, list) or not ids:
+            raise ApiError(400, "Pick at least one booking")
+        try:
+            ids = [int(x) for x in ids]
+        except (TypeError, ValueError):
+            raise ApiError(400, "ids must be numbers")
+        conn = get_db()
+        placeholders = ",".join(["%s"] * len(ids))
+        rows = conn.execute(
+            f"UPDATE courier_bookings SET status = 'Shared with DTDC' WHERE id IN ({placeholders}) AND status = 'Requested' RETURNING id",
+            tuple(ids),
+        ).fetchall()
+        conn.commit()
+        conn.close()
+        self.send_json(200, {"shared": len(rows)})
+
+    def requested_bookings_count(self):
+        hub_sql, params = self.hub_filter("hub_id")
+        conn = get_db()
+        n = conn.execute("SELECT COUNT(*) AS n FROM courier_bookings WHERE status = 'Requested'" + hub_sql, tuple(params)).fetchone()["n"]
+        conn.close()
+        self.send_json(200, {"requested": n})
+
     def update_courier_booking(self, booking_id):
+        self.require_admin()
         body = self.read_json_body()
         hub_sql, hub_params = self.hub_filter("hub_id")
         conn = get_db()
@@ -2571,7 +2651,7 @@ class Handler(BaseHTTPRequestHandler):
         rows = conn.execute(
             """
             SELECT b.id, b.pickup_date, b.boxes, b.declared_price, b.weight_kg, b.created_at,
-                   b.destination_name, b.tracking, b.status,
+                   b.destination_name, b.tracking, b.status, b.created_by,
                    v.name AS vendor_name, v.warehouse_label, v.pincode AS vendor_pincode,
                    v.contact_phone AS vendor_contact_phone, v.address AS vendor_address,
                    h.name AS hub_name, h.pincode AS hub_pincode, h.contact_name AS hub_contact_name,
