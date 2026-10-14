@@ -338,10 +338,10 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   </div>
   <div class="side-nav" id="topTabs" role="tablist" aria-orientation="vertical">
     <div class="side-nav-label">Shipments</div>
-    <button type="button" id="tabPendency" aria-selected="false">Pendency</button>
     <button type="button" id="tabPackShipments" aria-selected="true">Pack shipments</button>
     <button type="button" id="tabGateOut" aria-selected="false">Gate-out</button>
     <button type="button" id="tabDelivered" aria-selected="false">Mark delivered</button>
+    <button type="button" id="tabPendency" aria-selected="false">Pending to Scan</button>
     <button type="button" id="tabOpenShipments" aria-selected="false">Pending Dispatch &amp; Delivery</button>
     <button type="button" id="tabToMarkDelivered" aria-selected="false">Delivery mismatch (App vs HMS)</button>
     <button type="button" id="tabShipmentArchive" aria-selected="false">Shipment archive</button>
@@ -645,8 +645,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 <div class="app-shell" id="pendencyView" style="display:none; max-width: 1240px;">
   <div class="app-head">
     <div>
-      <p class="eyebrow">Return to Vendor · to pack</p>
-      <h1>Pendency</h1>
+      <p class="eyebrow">Return to Vendor · not scanned yet</p>
+      <h1>Pending to Scan</h1>
     </div>
   </div>
   <div class="card">
@@ -3361,7 +3361,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       renderPendGrid(hubs);
       renderPendList();
       loadClosedReturns();
-    }).catch(function (err) { toast("Couldn't load pendency: " + err.message, true); });
+    }).catch(function (err) { toast("Couldn't load pending to scan: " + err.message, true); });
   }
 
   function updateCloseBar() {
@@ -3554,7 +3554,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     clearFilters(["pendSearch", "pendHub", "pendBucket", "pendType"], renderPendList);
   });
   document.getElementById("pendCsv").addEventListener("click", function () {
-    downloadCsv("rtv-pendency-" + istToday() + ".csv",
+    downloadCsv("rtv-pending-to-scan-" + istToday() + ".csv",
       ["Return Tracking ID", "SKU", "Forward Tracking ID", "Return Type", "Seller", "Return Location", "Hub", "Clock started", "Clock column", "Age (hours)", "Bucket", "Return Status", "Sale Price"],
       filteredPend().map(function (it) {
         return [it.returnId, it.sku, it.forwardId, it.returnType, it.seller, it.returnLocation, it.hub, it.clockStart, it.clockColumn, it.ageHours, it.bucket, it.returnStatus, it.salePrice];
