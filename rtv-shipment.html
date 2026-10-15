@@ -242,6 +242,7 @@ body.is-admin .hub-only { display: none !important; }
 .tk-form-grid .full { grid-column: 1 / -1; }
 .tk-form-grid textarea { font: inherit; font-size: 13.5px; padding: 9px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); min-height: 90px; resize: vertical; }
 @media (max-width: 820px) { .tk-form-grid { grid-template-columns: 1fr; } }
+.sub-count { font-weight: 800; margin-left: 2px; }
 .id-list { font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.7; }
 .deliver-form { display: grid; grid-template-columns: 160px 1fr 1fr auto; gap: 10px; align-items: end; }
 .deliver-form .field label { font-size: 11px; }
@@ -372,14 +373,11 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   <div class="side-nav" id="topTabs" role="tablist" aria-orientation="vertical">
     <div class="side-nav-label">Shipments</div>
     <button type="button" id="tabPackShipments" aria-selected="true">Pack shipments</button>
-    <button type="button" id="tabGateOut" aria-selected="false">Gate-out</button>
-    <button type="button" id="tabDelivered" aria-selected="false">Mark delivered</button>
-    <button type="button" id="tabPendency" aria-selected="false">Pending to Scan</button>
-    <button type="button" id="tabOpenShipments" aria-selected="false">Pending Dispatch &amp; Delivery</button>
+    <button type="button" id="tabGateOut" aria-selected="false">Gate-out &amp; Delivery</button>
+    <button type="button" id="tabPendency" aria-selected="false">Pendency</button>
     <button type="button" id="tabToMarkDelivered" aria-selected="false">Delivery mismatch (App vs HMS)</button>
     <button type="button" id="tabShipmentArchive" aria-selected="false">Shipment archive</button>
     <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings<span class="nav-badge" id="cbNavBadge" title="Bookings waiting to be shared with DTDC"></span></button>
-    <button type="button" id="tabMyTickets" class="hub-only" aria-selected="false">My tickets</button>
     <div class="side-nav-label admin-only">Admin</div>
     <button type="button" id="tabDashboard" class="admin-only" aria-selected="false">Dashboard</button>
     <button type="button" id="tabRaisedIssues" class="admin-only" aria-selected="false">Raised issues<span class="nav-badge" id="tkNavBadge" title="Tickets not solved yet"></span></button>
@@ -396,6 +394,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <label for="viewHubSelect">Viewing</label>
       <select id="viewHubSelect"></select>
     </div>
+    <button type="button" class="link-btn hub-only" id="raiseIssueBtn">Raise an Issue</button>
     <button type="button" class="link-btn" id="signOutBtn">Sign out</button>
   </div>
 </nav>
@@ -634,8 +633,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 <div class="app-shell" id="gateOutView" style="display:none; max-width: 1040px;">
   <div class="app-head">
     <div>
-      <p class="eyebrow">Return to Vendor · dispatch</p>
-      <h1>Gate-out</h1>
+      <p class="eyebrow">Return to Vendor · dispatch and delivery</p>
+      <h1>Gate-out &amp; Delivery</h1>
     </div>
   </div>
   <div class="card">
@@ -645,24 +644,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <div class="scan-result" id="gateOutResult"></div>
   </div>
   <div class="card">
-    <h2>Dispatched today</h2>
-    <div class="table-wrap">
-      <table class="data-table"><thead><tr><th>Time</th><th>Invoice No.</th><th>Brand</th><th>Boxes</th><th>Units</th><th>By</th><th></th></tr></thead><tbody id="gateOutTodayBody"></tbody></table>
-    </div>
-  </div>
-</div>
-
-<div class="app-shell" id="deliveredView" style="display:none; max-width: 1100px;">
-  <div class="app-head">
-    <div>
-      <p class="eyebrow">Return to Vendor · delivery</p>
-      <h1>Mark delivered</h1>
-    </div>
-  </div>
-  <div class="card">
     <h2>Dispatched, waiting for delivery</h2>
-    <p class="hint">Scan or search an invoice, then add the delivery date and proof-of-delivery photo. The photo is <b>required for Local</b> brands and optional for Non-Local ones.</p>
-    <input id="deliverScan" class="scan-big" placeholder="Scan or type an invoice number…" autocomplete="off" spellcheck="false" style="margin-bottom:14px;">
+    <p class="hint">Every invoice scanned out above lands here. When it reaches the brand, mark it delivered with the date and proof-of-delivery photo — the photo is <b>required for Local</b> brands and optional for Non-Local ones. Scanned out by mistake? Undo it from its row.</p>
+    <div class="field" style="margin-bottom:14px;"><label for="deliverScan">Find an invoice</label><input id="deliverScan" placeholder="Scan or type an invoice number, or search a brand…" autocomplete="off" spellcheck="false"></div>
     <div class="table-wrap">
       <table class="data-table"><thead><tr><th>Invoice No.</th><th>Brand</th><th>Return location</th><th>Boxes</th><th>Dispatched</th><th></th></tr></thead><tbody id="awaitingBody"></tbody></table>
     </div>
@@ -678,9 +662,15 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 <div class="app-shell" id="pendencyView" style="display:none; max-width: 1240px;">
   <div class="app-head">
     <div>
-      <p class="eyebrow">Return to Vendor · not scanned yet</p>
-      <h1>Pending to Scan</h1>
+      <p class="eyebrow">Return to Vendor · what is still open</p>
+      <h1>Pendency</h1>
     </div>
+  <div class="brand-tabs" id="pendSubTabs" role="tablist">
+    <button type="button" data-sub="scan" aria-selected="true">Scan <span class="sub-count" id="pendSubScan"></span></button>
+    <button type="button" data-sub="dispatch" aria-selected="false">Dispatch <span class="sub-count" id="pendSubDispatch"></span></button>
+    <button type="button" data-sub="delivery" aria-selected="false">Delivery <span class="sub-count" id="pendSubDelivery"></span></button>
+  </div>
+  <div id="pendScanPanel">
   </div>
   <div class="card">
     <h2>Returns at the hub, not packed yet</h2>
@@ -737,6 +727,35 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <table class="data-table"><thead><tr><th>Return ID</th><th>SKU</th><th>Hub</th><th>Reason</th><th>Remarks</th><th>Closed by</th><th>Closed</th><th></th></tr></thead><tbody id="closedBody"></tbody></table>
     </div>
   </div>
+  </div>
+  <div id="pendOsPanel" style="display:none;">
+  <div class="card">
+    <h2 id="osTitle">Packed or dispatched, not yet delivered</h2>
+    <p class="hint" id="openHint"></p>
+    <div class="admin-only" style="display:flex; gap:8px; align-items:end; margin-bottom:12px;">
+      <div class="field"><label for="trackingFromInput">Tracking from (ship date)</label><input type="date" id="trackingFromInput"></div>
+      <button type="button" class="btn small secondary" id="trackingFromSave">Save</button>
+    </div>
+    <div class="table-toolbar">
+      <div class="stat-row" id="openStats"></div>
+      <div class="actions">
+        <button type="button" class="link-btn" id="osClear">Clear filters</button>
+        <button type="button" class="btn small secondary" id="osCsv">Download CSV</button>
+      </div>
+    </div>
+    <div class="filter-bar">
+      <div class="field"><label for="osSearch">Search</label><input id="osSearch" placeholder="Invoice or brand…" autocomplete="off"></div>
+      <div class="field" style="display:none;"><label for="osStatus">Status</label><select id="osStatus"><option value="">All open</option><option value="Packed">Waiting for gate-out</option><option value="Dispatched">Waiting for delivery</option></select></div>
+      <div class="field"><label for="osLoc">Return location</label><select id="osLoc"><option value="">All</option><option value="Local">Local</option><option value="Non-Local">Non-Local</option></select></div>
+      <div class="field"><label for="osAge">Waiting</label><select id="osAge"><option value="0">Any time</option><option value="1">1 day or more</option><option value="2">2 days or more</option><option value="3">3 days or more</option></select></div>
+      <div class="field"><label for="osFrom">Ship date from</label><input type="date" id="osFrom"></div>
+      <div class="field"><label for="osTo">Ship date to</label><input type="date" id="osTo"></div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table"><thead><tr><th>Invoice No.</th><th>Ship date</th><th>Hub</th><th>Brand</th><th>Return location</th><th>Boxes</th><th>Units</th><th>Amount</th><th>Status</th><th>Waiting</th></tr></thead><tbody id="osBody"></tbody></table>
+    </div>
+  </div>
+  </div>
 </div>
 
 <div class="app-shell" id="dashboardView" style="display:none; max-width: 1300px;">
@@ -771,11 +790,11 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   <div class="app-head">
     <div>
       <p class="eyebrow">Return to Vendor · help</p>
-      <h1>My tickets</h1>
+      <h1>Raise an Issue</h1>
     </div>
   </div>
   <div class="card">
-    <h2>Raise an issue</h2>
+    <h2>New issue</h2>
     <p class="hint">Stuck on something in the app or the process? Tell the admins here — you'll see their reply and the status below.</p>
     <div class="tk-form-grid">
       <div class="field"><label for="tkCategory">Category</label><select id="tkCategory"><option value="">Pick one…</option></select></div>
@@ -831,41 +850,6 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     </div>
     <div class="table-wrap">
       <table class="data-table"><thead><tr><th>Ticket</th><th>Raised</th><th>Hub</th><th>Category</th><th>Issue</th><th>Reference</th><th>Status</th><th>Reply</th><th></th></tr></thead><tbody id="riBody"></tbody></table>
-    </div>
-  </div>
-</div>
-
-<div class="app-shell" id="openShipmentsView" style="display:none; max-width: 1240px;">
-  <div class="app-head">
-    <div>
-      <p class="eyebrow">Return to Vendor · follow-up</p>
-      <h1>Pending Dispatch &amp; Delivery</h1>
-    </div>
-  </div>
-  <div class="card">
-    <h2>Packed or dispatched, not yet delivered</h2>
-    <p class="hint" id="openHint"></p>
-    <div class="admin-only" style="display:flex; gap:8px; align-items:end; margin-bottom:12px;">
-      <div class="field"><label for="trackingFromInput">Tracking from (ship date)</label><input type="date" id="trackingFromInput"></div>
-      <button type="button" class="btn small secondary" id="trackingFromSave">Save</button>
-    </div>
-    <div class="table-toolbar">
-      <div class="stat-row" id="openStats"></div>
-      <div class="actions">
-        <button type="button" class="link-btn" id="osClear">Clear filters</button>
-        <button type="button" class="btn small secondary" id="osCsv">Download CSV</button>
-      </div>
-    </div>
-    <div class="filter-bar">
-      <div class="field"><label for="osSearch">Search</label><input id="osSearch" placeholder="Invoice or brand…" autocomplete="off"></div>
-      <div class="field"><label for="osStatus">Status</label><select id="osStatus"><option value="">All open</option><option value="Packed">Waiting for gate-out</option><option value="Dispatched">Waiting for delivery</option></select></div>
-      <div class="field"><label for="osLoc">Return location</label><select id="osLoc"><option value="">All</option><option value="Local">Local</option><option value="Non-Local">Non-Local</option></select></div>
-      <div class="field"><label for="osAge">Waiting</label><select id="osAge"><option value="0">Any time</option><option value="1">1 day or more</option><option value="2">2 days or more</option><option value="3">3 days or more</option></select></div>
-      <div class="field"><label for="osFrom">Ship date from</label><input type="date" id="osFrom"></div>
-      <div class="field"><label for="osTo">Ship date to</label><input type="date" id="osTo"></div>
-    </div>
-    <div class="table-wrap">
-      <table class="data-table"><thead><tr><th>Invoice No.</th><th>Ship date</th><th>Hub</th><th>Brand</th><th>Return location</th><th>Boxes</th><th>Units</th><th>Amount</th><th>Status</th><th>Waiting</th></tr></thead><tbody id="osBody"></tbody></table>
     </div>
   </div>
 </div>
@@ -3174,14 +3158,10 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     document.getElementById("tabBrands").setAttribute("aria-selected", "false");
     document.getElementById("gateOutView").style.display = "none";
     document.getElementById("tabGateOut").setAttribute("aria-selected", "false");
-    document.getElementById("deliveredView").style.display = "none";
-    document.getElementById("tabDelivered").setAttribute("aria-selected", "false");
-    document.getElementById("openShipmentsView").style.display = "none";
-    document.getElementById("tabOpenShipments").setAttribute("aria-selected", "false");
     document.getElementById("pendencyView").style.display = "none";
     document.getElementById("tabPendency").setAttribute("aria-selected", "false");
     ["dashboardView", "myTicketsView", "raisedIssuesView"].forEach(function (id) { document.getElementById(id).style.display = "none"; });
-    ["tabDashboard", "tabMyTickets", "tabRaisedIssues"].forEach(function (id) { document.getElementById(id).setAttribute("aria-selected", "false"); });
+    ["tabDashboard", "tabRaisedIssues"].forEach(function (id) { document.getElementById(id).setAttribute("aria-selected", "false"); });
     document.getElementById("toMarkDeliveredView").style.display = "none";
     document.getElementById("tabToMarkDelivered").setAttribute("aria-selected", "false");
     document.getElementById("tabPackShipments").setAttribute("aria-selected", "false");
@@ -3322,35 +3302,10 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     hideAllTabViews();
     document.getElementById("gateOutView").style.display = "block";
     document.getElementById("tabGateOut").setAttribute("aria-selected", "true");
-    loadGateOutToday();
+    loadDeliveryLists();
     document.getElementById("gateOutScan").focus();
   }
   document.getElementById("tabGateOut").addEventListener("click", showGateOutView);
-
-  function loadGateOutToday() {
-    return getJson("/api/shipments/by-status?status=dispatched&since=" + istToday()).then(function (rows) {
-      var body = document.getElementById("gateOutTodayBody");
-      body.innerHTML = "";
-      rows.forEach(function (s) {
-        var tr = document.createElement("tr");
-        tr.innerHTML = "<td>" + escapeHtml(formatDateTime(s.dispatchedAt)) + "</td><td class='mono'>" + escapeHtml(s.invoiceNo) + "</td>" +
-          "<td>" + escapeHtml(brandLabel(s)) + "</td><td>" + s.boxes + "</td><td>" + s.units + "</td><td>" + escapeHtml(s.dispatchedBy || "") + "</td><td></td>";
-        var undo = document.createElement("button");
-        undo.type = "button";
-        undo.className = "link-btn";
-        undo.textContent = "Undo";
-        undo.addEventListener("click", function () {
-          if (!window.confirm("Undo the gate-out for " + s.invoiceNo + "? It goes back to packed, not dispatched.")) return;
-          postJson("/api/shipments/" + s.id + "/undo-gate-out", {})
-            .then(function () { toast("Gate-out undone: " + s.invoiceNo); return loadGateOutToday(); })
-            .catch(function (err) { toast(err.message, true); });
-        });
-        tr.lastElementChild.appendChild(undo);
-        body.appendChild(tr);
-      });
-      if (!rows.length) body.innerHTML = "<tr><td colspan='7' class='empty-state'>Nothing dispatched yet today.</td></tr>";
-    }).catch(function (err) { toast("Couldn't load today's dispatches: " + err.message, true); });
-  }
 
   var gateOutBusy = false;
   document.getElementById("gateOutScan").addEventListener("keydown", function (e) {
@@ -3366,8 +3321,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       .then(function (s) {
         out.className = "scan-result is-ok";
         out.innerHTML = "<div class='big'>Dispatched · " + escapeHtml(s.invoiceNo) + "</div>" +
-          escapeHtml(brandLabel(s)) + " · " + s.boxes + " box" + (s.boxes === 1 ? "" : "es") + " · " + s.units + " units";
-        return loadGateOutToday();
+          escapeHtml(brandLabel(s)) + " · " + s.boxes + " box" + (s.boxes === 1 ? "" : "es") + " · " + s.units + " units — now in the list below, ready to mark delivered";
+        return loadDeliveryLists();
       })
       .catch(function (err) {
         out.className = "scan-result is-bad";
@@ -3378,15 +3333,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 
   // ================= mark delivered =================
   var awaiting = [];
-  function showDeliveredView() {
-    currentTabShow = showDeliveredView;
-    hideAllTabViews();
-    document.getElementById("deliveredView").style.display = "block";
-    document.getElementById("tabDelivered").setAttribute("aria-selected", "true");
-    loadDeliveryLists();
-    document.getElementById("deliverScan").focus();
-  }
-  document.getElementById("tabDelivered").addEventListener("click", showDeliveredView);
+  function showDeliveredView() { showGateOutView(); }
 
   function loadDeliveryLists() {
     var weekAgo = new Date(Date.now() + 5.5 * 3600000 - 7 * 86400000).toISOString().slice(0, 10);
@@ -3428,7 +3375,20 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       btn.className = "btn small";
       btn.textContent = "Mark delivered";
       btn.addEventListener("click", function () { toggleDeliverForm(tr, s); });
+      tr.lastElementChild.style.whiteSpace = "nowrap";
       tr.lastElementChild.appendChild(btn);
+      var undo = document.createElement("button");
+      undo.type = "button";
+      undo.className = "link-btn";
+      undo.style.marginLeft = "12px";
+      undo.textContent = "Undo gate-out";
+      undo.addEventListener("click", function () {
+        if (!window.confirm("Undo the gate-out for " + s.invoiceNo + "? It goes back to packed, not dispatched.")) return;
+        postJson("/api/shipments/" + s.id + "/undo-gate-out", {})
+          .then(function () { toast("Gate-out undone: " + s.invoiceNo); return loadDeliveryLists(); })
+          .catch(function (err) { toast(err.message, true); });
+      });
+      tr.lastElementChild.appendChild(undo);
       body.appendChild(tr);
       if (openId === s.id) toggleDeliverForm(tr, s);
     });
@@ -3544,10 +3504,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     currentTabShow = showMyTicketsView;
     hideAllTabViews();
     document.getElementById("myTicketsView").style.display = "block";
-    document.getElementById("tabMyTickets").setAttribute("aria-selected", "true");
     loadTickets(renderMyTickets);
   }
-  document.getElementById("tabMyTickets").addEventListener("click", showMyTicketsView);
+  document.getElementById("raiseIssueBtn").addEventListener("click", showMyTicketsView);
 
   function filteredMyTickets() {
     var q = document.getElementById("myTkSearch").value.trim().toLowerCase();
@@ -3724,9 +3683,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       var t = d.totals;
       document.getElementById("dashAsOf").textContent = "Updated " + formatDateTime(d.asOf);
       var kpis = [
-        { k: "Pending to Scan", v: t.pend1 + t.pend2 + t.pend3, sub: "<b class='bad'>" + n(t.pend3) + "</b> at 3+ days · " + n(t.pend2) + " at 2 days", go: showPendencyView, bad: t.pend3 > 0 },
-        { k: "Waiting for gate-out", v: t.waitingGateOut, sub: "packed, not dispatched", go: showOpenShipmentsView },
-        { k: "Waiting for delivery", v: t.waitingDelivery, sub: "<b class='bad'>" + n(t.waiting3d) + "</b> invoices waiting 3+ days", go: showOpenShipmentsView },
+        { k: "Pending to Scan", v: t.pend1 + t.pend2 + t.pend3, sub: "<b class='bad'>" + n(t.pend3) + "</b> at 3+ days · " + n(t.pend2) + " at 2 days", go: function () { showPendencyView("scan"); }, bad: t.pend3 > 0 },
+        { k: "Waiting for gate-out", v: t.waitingGateOut, sub: "packed, not dispatched", go: function () { showPendencyView("dispatch"); } },
+        { k: "Waiting for delivery", v: t.waitingDelivery, sub: "<b class='bad'>" + n(t.waiting3d) + "</b> invoices waiting 3+ days", go: function () { showPendencyView("delivery"); } },
         { k: "Delivery mismatch", v: t.mismatchInvoices, sub: n(t.mismatchReturns) + " returns to mark in HMS", go: showToMarkDeliveredView },
         { k: "Courier requests", v: t.requestedBookings, sub: "waiting to be shared with DTDC", go: showCourierBookingsView, bad: t.requestedBookings > 0 },
         { k: "Open tickets", v: t.openTickets, sub: n(d.tickets["In progress"]) + " in progress", go: showRaisedIssuesView, bad: t.openTickets > 0 },
@@ -3783,14 +3742,41 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   var pendItems = [];
   var pendPicked = new Set(); // "returnId|sku" of ticked rows
   function pendKey(it) { return it.returnId + "|" + (it.sku || ""); }
-  function showPendencyView() {
-    currentTabShow = showPendencyView;
+  var pendSub = "scan";
+  function showPendencyView(sub) {
+    if (typeof sub === "string") pendSub = sub;
+    currentTabShow = function () { showPendencyView(pendSub); };
     hideAllTabViews();
     document.getElementById("pendencyView").style.display = "block";
     document.getElementById("tabPendency").setAttribute("aria-selected", "true");
+    setPendSub(pendSub);
     loadPendency();
+    loadOpenShipments();
   }
-  document.getElementById("tabPendency").addEventListener("click", showPendencyView);
+  document.getElementById("tabPendency").addEventListener("click", function () { showPendencyView(); });
+
+  // Scan = returns not packed yet; Dispatch = packed, not scanned at gate-out;
+  // Delivery = dispatched, not delivered. The last two share one list.
+  function setPendSub(sub) {
+    pendSub = sub;
+    document.querySelectorAll("#pendSubTabs button").forEach(function (b) { b.setAttribute("aria-selected", b.dataset.sub === sub ? "true" : "false"); });
+    document.getElementById("pendScanPanel").style.display = sub === "scan" ? "" : "none";
+    document.getElementById("pendOsPanel").style.display = sub === "scan" ? "none" : "";
+    if (sub !== "scan") {
+      document.getElementById("osStatus").value = sub === "dispatch" ? "Packed" : "Dispatched";
+      document.getElementById("osTitle").textContent = sub === "dispatch" ? "Packed, waiting for gate-out" : "Dispatched, waiting for delivery";
+      renderOpenShipments();
+    }
+  }
+  document.querySelectorAll("#pendSubTabs button").forEach(function (b) {
+    b.addEventListener("click", function () { setPendSub(b.dataset.sub); });
+  });
+  function updatePendSubCounts() {
+    document.getElementById("pendSubScan").textContent = pendItems.length ? "(" + pendItems.length.toLocaleString("en-IN") + ")" : "";
+    var packed = openRows.filter(function (s) { return s.status === "Packed"; }).length;
+    document.getElementById("pendSubDispatch").textContent = "(" + packed.toLocaleString("en-IN") + ")";
+    document.getElementById("pendSubDelivery").textContent = "(" + (openRows.length - packed).toLocaleString("en-IN") + ")";
+  }
 
   function fillOptions(select, values, allLabel) {
     var current = select.value;
@@ -3813,6 +3799,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       pendPicked.forEach(function (k) { if (!live.has(k)) pendPicked.delete(k); });
       renderPendGrid(hubs);
       renderPendList();
+      updatePendSubCounts();
       loadClosedReturns();
     }).catch(function (err) { toast("Couldn't load pending to scan: " + err.message, true); });
   }
@@ -4024,14 +4011,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     return "<span class='" + cls + "'>" + escapeHtml(timeAgo(iso).replace(" ago", "")) + "</span>";
   }
 
-  function showOpenShipmentsView() {
-    currentTabShow = showOpenShipmentsView;
-    hideAllTabViews();
-    document.getElementById("openShipmentsView").style.display = "block";
-    document.getElementById("tabOpenShipments").setAttribute("aria-selected", "true");
-    loadOpenShipments();
-  }
-  document.getElementById("tabOpenShipments").addEventListener("click", showOpenShipmentsView);
+  function showOpenShipmentsView() { showPendencyView("dispatch"); }
 
   function loadOpenShipments() {
     return getJson("/api/shipments/open").then(function (res) {
@@ -4039,7 +4019,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       document.getElementById("trackingFromInput").value = res.trackingFrom || "";
       document.getElementById("openHint").textContent = "Invoices packed from " + formatDate(res.trackingFrom) +
         " on. Waiting is time since packing (for gate-out) or since dispatch (for delivery); amber is a day or more, red three days or more.";
+      if (pendSub !== "scan") document.getElementById("osStatus").value = pendSub === "dispatch" ? "Packed" : "Dispatched";
       renderOpenShipments();
+      updatePendSubCounts();
     }).catch(function (err) { toast("Couldn't load pending dispatch & delivery: " + err.message, true); });
   }
 
@@ -4074,7 +4056,14 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         "<td class='mono'>" + formatMoney(s.amount) + "</td><td>" + statusCell(s) + "</td><td>" + waitingCell(waitingSince(s)) + "</td>";
       body.appendChild(tr);
     });
-    if (!rows.length) body.innerHTML = "<tr><td colspan='10' class='empty-state'>" + (openRows.length ? "Nothing matches these filters." : "Every invoice is delivered.") + "</td></tr>";
+    if (!rows.length) {
+      // "No filters" here means only the tab's own status is set.
+      var st = document.getElementById("osStatus").value;
+      var inTab = openRows.filter(function (x) { return !st || x.status === st; }).length;
+      var msg = inTab ? "Nothing matches these filters."
+        : st === "Packed" ? "Nothing waiting for gate-out." : st === "Dispatched" ? "Nothing waiting for delivery." : "Every invoice is delivered.";
+      body.innerHTML = "<tr><td colspan='10' class='empty-state'>" + msg + "</td></tr>";
+    }
   }
   ["osSearch", "osStatus", "osLoc", "osAge", "osFrom", "osTo"].forEach(function (id) {
     document.getElementById(id).addEventListener(id === "osSearch" ? "input" : "change", renderOpenShipments);
@@ -4087,7 +4076,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     render();
   }
   document.getElementById("osClear").addEventListener("click", function () {
-    clearFilters(["osSearch", "osStatus", "osLoc", "osAge", "osFrom", "osTo"], renderOpenShipments);
+    clearFilters(["osSearch", "osLoc", "osAge", "osFrom", "osTo"], renderOpenShipments);
   });
   document.getElementById("osCsv").addEventListener("click", function () {
     downloadCsv("rtv-pending-dispatch-delivery-" + istToday() + ".csv",
