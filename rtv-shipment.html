@@ -493,14 +493,6 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     </div>
   </div>
 
-  <div class="card">
-    <h2>Recent shipments</h2>
-    <p class="hint">Reopen any past shipment to reprint its box labels or invoice copies.</p>
-    <div class="table-wrap">
-      <table class="data-table"><thead><tr><th>Invoice No.</th><th>Ship date</th><th>Hub</th><th>Vendor</th><th>Boxes</th><th>Units</th><th>Amount</th></tr></thead><tbody id="recentBody"></tbody></table>
-    </div>
-    <p class="empty-state" id="recentEmpty" style="display:none;">No shipments created yet.</p>
-  </div>
 </div>
 
 <div class="app-shell" id="shipmentArchiveView" style="display:none; max-width: 960px;">
@@ -518,7 +510,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <input id="archiveSearch" placeholder="Invoice number, vendor or hub…" autocomplete="off">
     </div>
     <div class="table-wrap">
-      <table class="data-table"><thead><tr><th>Invoice No.</th><th>Ship date</th><th>Hub</th><th>Vendor</th><th>Boxes</th><th>Units</th><th>Amount</th><th>Status</th></tr></thead><tbody id="archiveBody"></tbody></table>
+      <table class="data-table"><thead><tr><th>Invoice No.</th><th>Ship date</th><th>Hub</th><th>Vendor</th><th>Boxes</th><th>Units</th><th>Amount</th><th>Status</th><th class="admin-only"></th></tr></thead><tbody id="archiveBody"></tbody></table>
     </div>
     <p class="empty-state" id="archiveEmpty" style="display:none;">No shipments found.</p>
   </div>
@@ -654,7 +646,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   <div class="card">
     <h2>Delivered in the last 7 days</h2>
     <div class="table-wrap">
-      <table class="data-table"><thead><tr><th>Invoice No.</th><th>Brand</th><th>Delivered on</th><th>By</th><th>Proof of delivery</th></tr></thead><tbody id="deliveredRecentBody"></tbody></table>
+      <table class="data-table"><thead><tr><th>Invoice No.</th><th>Brand</th><th>Delivered on</th><th>By</th><th>Proof of delivery</th><th class="admin-only"></th></tr></thead><tbody id="deliveredRecentBody"></tbody></table>
     </div>
   </div>
 </div>
@@ -2128,9 +2120,12 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     printViewShipment = full;
     var totals = shipmentTotals(full);
 
-    document.getElementById("formView").style.display = "none";
-    document.getElementById("batchView").style.display = "none";
+    // Hide whatever screen it was opened from (the archive used to stay on
+    // screen with the invoice drawn below a very long list).
+    hideAllTabViews();
+    if (printViewOrigin === "shipmentArchiveView") document.getElementById("tabShipmentArchive").setAttribute("aria-selected", "true");
     document.getElementById("printView").style.display = "block";
+    window.scrollTo(0, 0);
     document.getElementById("challanNo").textContent = full.invoiceNo;
     document.getElementById("pageTitle").textContent = full.vendor.name + (full.vendor.warehouseLabel ? " — " + full.vendor.warehouseLabel : "");
     document.getElementById("metaVendor").textContent = full.vendor.name;
@@ -2618,7 +2613,6 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       toast("Created " + entries.length + " shipment" + (entries.length === 1 ? "" : "s"));
       currentBox = []; closedBoxes = []; boxNo = 1; scannedTrackingIds = new Set();
       renderCurrentBox(); renderClosedBoxes();
-      renderRecent();
       openBatchView(entries);
     }).catch(function (err) {
       scanErrEl.textContent = "Couldn't create shipment(s): " + err.message;
@@ -2718,43 +2712,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   document.getElementById("batchBackLink").addEventListener("click", function () {
     document.getElementById("batchView").style.display = "none";
     document.getElementById("formView").style.display = "block";
-    renderRecent();
   });
-
-  // ================= recent shipments =================
-  // Fetched fresh from the central database each time — hub/vendor names and
-  // totals are already denormalized server-side, so no local lookup needed.
-  function renderRecent() {
-    return getJson("/api/shipments").then(function (shipments) {
-      var body = document.getElementById("recentBody");
-      body.innerHTML = "";
-      document.getElementById("recentEmpty").style.display = shipments.length ? "none" : "block";
-      shipments.forEach(function (s) {
-        var tr = document.createElement("tr");
-        var td0 = document.createElement("td");
-        var link = document.createElement("button");
-        link.type = "button";
-        link.className = "recent-row-link mono";
-        link.textContent = s.invoiceNo;
-        link.addEventListener("click", function () {
-          getJson("/api/shipments/" + s.id)
-            .then(function (full) { printViewOrigin = "formView"; openPrintView(full); })
-            .catch(function (err) { toast("Couldn't open shipment: " + err.message, true); });
-        });
-        td0.appendChild(link);
-        tr.appendChild(td0);
-        tr.insertAdjacentHTML("beforeend",
-          "<td>" + escapeHtml(s.shipDate) + "</td>" +
-          "<td>" + escapeHtml(s.hubName) + "</td>" +
-          "<td>" + escapeHtml(s.vendorName) + (s.warehouseLabel ? " — " + escapeHtml(s.warehouseLabel) : "") + "</td>" +
-          "<td>" + s.boxes + "</td>" +
-          "<td>" + s.units + "</td>" +
-          "<td class='mono'>" + formatMoney(s.amount) + "</td>"
-        );
-        body.appendChild(tr);
-      });
-    }).catch(function (err) { toast("Couldn't load shipments: " + err.message, true); });
-  }
 
   // ================= shipment archive =================
   // Tracks which tab opened printView, so its Back link returns there
@@ -2788,8 +2746,9 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
           "<td>" + s.boxes + "</td>" +
           "<td>" + s.units + "</td>" +
           "<td class='mono'>" + formatMoney(s.amount) + "</td>" +
-          "<td>" + statusCell(s) + "</td>"
+          "<td>" + statusCell(s) + "</td><td class='admin-only'></td>"
         );
+        if (isAdmin() && s.status === "Delivered") addEditPodButton(tr, s, 9, function () { renderArchive(document.getElementById("archiveSearch").value.trim()); });
         body.appendChild(tr);
       });
     }).catch(function (err) { toast("Couldn't load shipment archive: " + err.message, true); });
@@ -3184,7 +3143,6 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     hideAllTabViews();
     document.getElementById("formView").style.display = "block";
     document.getElementById("tabPackShipments").setAttribute("aria-selected", "true");
-    renderRecent();
   }
   function showShipmentArchiveView() {
     currentTabShow = showShipmentArchiveView;
@@ -3350,10 +3308,12 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         tr.innerHTML = "<td class='mono'>" + escapeHtml(s.invoiceNo) + "</td><td>" + escapeHtml(brandLabel(s)) + "</td>" +
           "<td>" + escapeHtml(formatDate(s.deliveredOn)) + "</td><td>" + escapeHtml(s.deliveredBy || "") + "</td>" +
           "<td>" + (s.podUrl ? "<a href='" + escapeHtml(s.podUrl) + "' target='_blank' rel='noopener'>Open photo</a>" : "<span class='hint' style='margin:0;'>No photo</span>") +
-          (s.deliveryNote ? " · " + escapeHtml(s.deliveryNote) : "") + "</td>";
+          (s.deliveryNote ? " · " + escapeHtml(s.deliveryNote) : "") +
+          (s.podUpdatedBy ? "<div class='hint' style='margin:0;'>Edited by " + escapeHtml(s.podUpdatedBy) + ", " + escapeHtml(formatDateTime(s.podUpdatedAt)) + "</div>" : "") + "</td><td class='admin-only'></td>";
+        if (isAdmin()) addEditPodButton(tr, s, 6, loadDeliveryLists);
         body.appendChild(tr);
       });
-      if (!res[1].length) body.innerHTML = "<tr><td colspan='5' class='empty-state'>Nothing delivered in the last 7 days.</td></tr>";
+      if (!res[1].length) body.innerHTML = "<tr><td colspan='6' class='empty-state'>Nothing delivered in the last 7 days.</td></tr>";
     }).catch(function (err) { toast("Couldn't load deliveries: " + err.message, true); });
   }
 
@@ -3421,6 +3381,47 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("That file isn't a photo the browser can open")); };
       img.src = url;
     });
+  }
+
+  // Admin: replace the POD photo and/or fix the delivery date or note.
+  function addEditPodButton(tr, s, colspan, onSaved) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "link-btn";
+    b.textContent = "Edit POD";
+    b.addEventListener("click", function () {
+      var next = tr.nextElementSibling;
+      if (next && next.classList.contains("deliver-row")) { next.remove(); return; }
+      var row = document.createElement("tr");
+      row.className = "deliver-row";
+      row.innerHTML = "<td colspan='" + colspan + "'><div class='deliver-form'>" +
+        "<div class='field'><label>Delivered on</label><input type='date' class='pe-date'></div>" +
+        "<div class='field'><label>New photo (leave empty to keep the current one)</label><input type='file' class='pe-photo' accept='image/*'></div>" +
+        "<div class='field'><label>Note</label><input type='text' class='pe-note' maxlength='500'></div>" +
+        "<button type='button' class='btn small pe-save'>Save</button></div>" +
+        "<p class='hint' style='margin:6px 0 0;'>" + (s.podUrl ? "Current photo: <a href='" + escapeHtml(s.podUrl) + "' target='_blank' rel='noopener'>open</a>. " : "No photo yet. ") +
+        "A replaced photo stays in the Drive folder; only the link here changes.</p><p class='field-error pe-err' style='margin:4px 0 0;'></p></td>";
+      var dateEl = row.querySelector(".pe-date");
+      dateEl.value = s.deliveredOn || istToday();
+      dateEl.min = s.shipDate;
+      dateEl.max = istToday();
+      row.querySelector(".pe-note").value = s.deliveryNote || "";
+      var save = row.querySelector(".pe-save"), err = row.querySelector(".pe-err");
+      save.addEventListener("click", function () {
+        var file = row.querySelector(".pe-photo").files[0];
+        if (!dateEl.value) { err.textContent = "Pick the delivery date."; return; }
+        save.disabled = true;
+        save.textContent = file ? "Uploading…" : "Saving…";
+        (file ? compressPhoto(file) : Promise.resolve(null))
+          .then(function (b64) {
+            return postJson("/api/shipments/" + s.id + "/pod", { deliveredOn: dateEl.value, note: row.querySelector(".pe-note").value.trim(), photoBase64: b64 || "" });
+          })
+          .then(function (u) { toast("POD updated: " + u.invoiceNo); return onSaved(); })
+          .catch(function (e) { err.textContent = e.message; save.disabled = false; save.textContent = "Save"; });
+      });
+      tr.after(row);
+    });
+    tr.lastElementChild.appendChild(b);
   }
 
   function toggleDeliverForm(tr, s) {

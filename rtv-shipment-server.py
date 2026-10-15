@@ -518,6 +518,8 @@ def init_db():
         ALTER TABLE shipments ADD COLUMN IF NOT EXISTS delivery_note TEXT;
         ALTER TABLE shipments ADD COLUMN IF NOT EXISTS pod_url TEXT;
         ALTER TABLE shipments ADD COLUMN IF NOT EXISTS pod_file_id TEXT;
+        ALTER TABLE shipments ADD COLUMN IF NOT EXISTS pod_updated_at TEXT;
+        ALTER TABLE shipments ADD COLUMN IF NOT EXISTS pod_updated_by TEXT;
         """
     )
     conn.commit()
@@ -963,7 +965,7 @@ def shipment_status(row):
 SHIPMENT_LIST_SQL = """
     SELECT s.id, s.invoice_no, s.ship_date, s.created_at, s.hub_id,
            s.dispatched_at, s.dispatched_by, s.delivered_on, s.delivered_at, s.delivered_by,
-           s.delivery_note, s.pod_url,
+           s.delivery_note, s.pod_url, s.pod_updated_at, s.pod_updated_by,
            h.name AS hub_name, v.name AS vendor_name, v.warehouse_label, v.return_location,
            (SELECT COUNT(DISTINCT box_no) FROM shipment_items WHERE shipment_id = s.id) AS boxes,
            (SELECT COUNT(*) FROM shipment_items WHERE shipment_id = s.id) AS lines,
@@ -997,6 +999,8 @@ def shipment_list_dict(r):
         "deliveredBy": r["delivered_by"],
         "deliveryNote": r["delivery_note"],
         "podUrl": r["pod_url"],
+        "podUpdatedAt": r["pod_updated_at"],
+        "podUpdatedBy": r["pod_updated_by"],
     }
 
 
@@ -1292,8 +1296,6 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/lookup":
                 tracking = (qs.get("tracking") or [""])[0].strip()
                 return self.lookup_tracking(tracking)
-            if path == "/api/shipments":
-                return self.list_shipments()
             if path == "/api/pendency":
                 return self.list_pendency()
             if path == "/api/dashboard":
@@ -1380,6 +1382,9 @@ class Handler(BaseHTTPRequestHandler):
             m = re.match(r"^/api/shipments/(\d+)/undo-gate-out$", path)
             if m:
                 return self.undo_gate_out(int(m.group(1)))
+            m = re.match(r"^/api/shipments/(\d+)/pod$", path)
+            if m:
+                return self.edit_pod(int(m.group(1)))
             m = re.match(r"^/api/shipments/(\d+)/deliver$", path)
             if m:
                 return self.mark_delivered(int(m.group(1)))
@@ -1922,46 +1927,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(200, hub_to_dict(row))
 
     # ---------- shipments ----------
-    def list_shipments(self):
-        hub_sql, hub_params = self.hub_filter("s.hub_id")
-        conn = get_db()
-        rows = conn.execute(
-            """
-            SELECT s.id, s.invoice_no, s.ship_date, s.created_at,
-                   h.name AS hub_name, v.name AS vendor_name, v.warehouse_label,
-                   (SELECT COUNT(DISTINCT box_no) FROM shipment_items WHERE shipment_id = s.id) AS boxes,
-                   (SELECT COUNT(*) FROM shipment_items WHERE shipment_id = s.id) AS lines,
-                   (SELECT COALESCE(SUM(qty), 0) FROM shipment_items WHERE shipment_id = s.id) AS units,
-                   (SELECT COALESCE(SUM(qty * value), 0) FROM shipment_items WHERE shipment_id = s.id) AS amount
-            FROM shipments s
-            JOIN hubs h ON h.id = s.hub_id
-            JOIN vendors v ON v.id = s.vendor_id
-            WHERE TRUE {hub_sql}
-            ORDER BY s.id DESC
-            LIMIT 200
-            """.format(hub_sql=hub_sql),
-            tuple(hub_params),
-        ).fetchall()
-        conn.close()
-        out = [
-            {
-                "id": r["id"],
-                "invoiceNo": r["invoice_no"],
-                "shipDate": r["ship_date"],
-                "createdAt": r["created_at"],
-                "hubName": r["hub_name"],
-                "vendorName": r["vendor_name"],
-                "warehouseLabel": r["warehouse_label"],
-                "boxes": r["boxes"],
-                "lines": r["lines"],
-                "units": r["units"],
-                "amount": r["amount"],
-            }
-            for r in rows
-        ]
-        self.send_json(200, out)
-
-    # Full history for the Shipment Archive tab — unlike list_shipments()
+    # Full history for the Shipment Archive tab — no practical cap, with
     # (capped at 200, backs the small "recent shipments" widget), this has no
     # practical cap and supports a free-text search across invoice/vendor/hub.
     def list_shipments_archive(self, q):
@@ -2398,6 +2364,54 @@ class Handler(BaseHTTPRequestHandler):
         conn.commit()
         conn.close()
         self.send_json(200, {"id": shipment_id, "status": "Packed"})
+
+    # Admin correction of a delivered invoice: replace the POD photo and/or
+    # change the delivery date or note. The old photo stays in Drive (the
+    # upload script can only add files).
+    def edit_pod(self, shipment_id):
+        user = self.require_admin()
+        if int(self.headers.get("Content-Length", 0) or 0) > MAX_POD_BYTES * 2:
+            raise ApiError(413, "Photo is too large")
+        body = self.read_json_body()
+        conn = get_db()
+        row = self.find_scoped_shipment(conn, shipment_id=shipment_id)
+        conn.close()
+        if not row:
+            raise ApiError(404, "Shipment not found")
+        if not row["delivered_at"]:
+            raise ApiError(409, "Only a delivered invoice has a POD to edit")
+        delivered_on = (body.get("deliveredOn") or row["delivered_on"] or "").strip()
+        try:
+            datetime.strptime(delivered_on, "%Y-%m-%d")
+        except ValueError:
+            raise ApiError(400, "Pick the delivery date")
+        if delivered_on < row["ship_date"]:
+            raise ApiError(400, "Delivery date can't be before the invoice's ship date")
+        note = (body.get("note") if "note" in body else row["delivery_note"]) or ""
+        note = note.strip()[:500] or None
+        file_id, pod_url = None, row["pod_url"]
+        photo_b64 = body.get("photoBase64") or ""
+        if photo_b64:
+            try:
+                data = base64.b64decode(photo_b64, validate=True)
+            except (ValueError, TypeError):
+                raise ApiError(400, "The photo didn't upload properly — try again")
+            if len(data) > MAX_POD_BYTES:
+                raise ApiError(413, "Photo is too large")
+            stamp = datetime.now(IST).strftime("%Y%m%d-%H%M")
+            file_id, pod_url = upload_pod_to_drive(data, "image/jpeg", f"{row['invoice_no']}-POD-{delivered_on}-edited-{stamp}.jpg", delivered_on[:7])
+        if row["return_location"] != "Non-Local" and not pod_url:
+            raise ApiError(400, "A proof-of-delivery photo is required for Local deliveries")
+        conn = get_db()
+        conn.execute(
+            "UPDATE shipments SET delivered_on = %s, delivery_note = %s, pod_url = %s, "
+            "pod_file_id = COALESCE(%s, pod_file_id), pod_updated_at = %s, pod_updated_by = %s WHERE id = %s",
+            (delivered_on, note, pod_url, file_id, datetime.now(timezone.utc).isoformat(), user["username"], shipment_id),
+        )
+        conn.commit()
+        row = self.find_scoped_shipment(conn, shipment_id=shipment_id)
+        conn.close()
+        self.send_json(200, shipment_list_dict(row))
 
     def mark_delivered(self, shipment_id):
         user = self.require_user()
