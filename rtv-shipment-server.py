@@ -498,6 +498,11 @@ def init_db():
             solved_at TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_tickets_hub_id ON tickets(hub_id);
+        CREATE INDEX IF NOT EXISTS idx_courier_bookings_hub_id ON courier_bookings(hub_id);
+        CREATE INDEX IF NOT EXISTS idx_courier_bookings_vendor_id ON courier_bookings(vendor_id);
+        CREATE INDEX IF NOT EXISTS idx_sessions_view_hub_id ON sessions(view_hub_id);
+        CREATE INDEX IF NOT EXISTS idx_shipments_hub_ship_date ON shipments(hub_id, ship_date);
+        CREATE INDEX IF NOT EXISTS idx_shipments_vendor_id ON shipments(vendor_id);
         CREATE TABLE IF NOT EXISTS return_closures (
             return_tracking_id TEXT NOT NULL,
             sku TEXT NOT NULL DEFAULT '',
@@ -508,6 +513,7 @@ def init_db():
             closed_at TEXT NOT NULL,
             PRIMARY KEY (return_tracking_id, sku)
         );
+        CREATE INDEX IF NOT EXISTS idx_return_closures_hub_id ON return_closures(hub_id);
         -- Gate-out and delivery are per invoice: one scan of the invoice
         -- barcode dispatches every box on it.
         ALTER TABLE shipments ADD COLUMN IF NOT EXISTS dispatched_at TEXT;
@@ -541,6 +547,23 @@ def init_db():
                 """,
                 (name, SEED_SHORT_NAMES.get(name, ""), "", address, w["contact_name"], w["contact_phone"], w.get("contact_email", "")),
             )
+    conn.commit()
+
+    conn.execute(
+        """
+        DO $$
+        DECLARE t text;
+        BEGIN
+          FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = current_schema() LOOP
+            EXECUTE format('ALTER TABLE %%I ENABLE ROW LEVEL SECURITY', t);
+          END LOOP;
+          IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+            EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %%I FROM anon, authenticated', current_schema());
+            EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA %%I FROM anon, authenticated', current_schema());
+          END IF;
+        END $$;
+        """
+    )
     conn.commit()
 
     # Invoices packed before gate-out existed were never scanned out, so the
@@ -967,13 +990,15 @@ SHIPMENT_LIST_SQL = """
            s.dispatched_at, s.dispatched_by, s.delivered_on, s.delivered_at, s.delivered_by,
            s.delivery_note, s.pod_url, s.pod_updated_at, s.pod_updated_by,
            h.name AS hub_name, v.name AS vendor_name, v.warehouse_label, v.return_location,
-           (SELECT COUNT(DISTINCT box_no) FROM shipment_items WHERE shipment_id = s.id) AS boxes,
-           (SELECT COUNT(*) FROM shipment_items WHERE shipment_id = s.id) AS lines,
-           (SELECT COALESCE(SUM(qty), 0) FROM shipment_items WHERE shipment_id = s.id) AS units,
-           (SELECT COALESCE(SUM(qty * value), 0) FROM shipment_items WHERE shipment_id = s.id) AS amount
+           t.boxes, t.lines, t.units, t.amount
     FROM shipments s
     JOIN hubs h ON h.id = s.hub_id
     JOIN vendors v ON v.id = s.vendor_id
+    LEFT JOIN LATERAL (
+        SELECT COUNT(DISTINCT box_no) AS boxes, COUNT(*) AS lines,
+               COALESCE(SUM(qty), 0) AS units, COALESCE(SUM(qty * value), 0) AS amount
+        FROM shipment_items WHERE shipment_id = s.id
+    ) t ON TRUE
 """
 
 
@@ -2583,10 +2608,10 @@ class Handler(BaseHTTPRequestHandler):
         conn = get_db()
         sql = (
             "SELECT s.id, s.invoice_no, s.ship_date, s.vendor_id, s.hub_id, "
-            "v.name AS vendor_name, v.warehouse_label, h.name AS hub_name, "
-            "(SELECT COUNT(DISTINCT box_no) FROM shipment_items WHERE shipment_id = s.id) AS boxes, "
-            "(SELECT COALESCE(SUM(qty * value), 0) FROM shipment_items WHERE shipment_id = s.id) AS amount "
+            "v.name AS vendor_name, v.warehouse_label, h.name AS hub_name, t.boxes, t.amount "
             "FROM shipments s JOIN vendors v ON v.id = s.vendor_id JOIN hubs h ON h.id = s.hub_id "
+            "LEFT JOIN LATERAL (SELECT COUNT(DISTINCT box_no) AS boxes, COALESCE(SUM(qty * value), 0) AS amount "
+            "FROM shipment_items WHERE shipment_id = s.id) t ON TRUE "
             "WHERE s.id NOT IN (SELECT shipment_id FROM courier_booking_shipments)"
         )
         hub_sql, params = self.hub_filter("s.hub_id")
