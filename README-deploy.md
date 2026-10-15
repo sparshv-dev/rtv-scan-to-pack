@@ -75,10 +75,32 @@ Render's environment variable field.**
     request after a gap takes ~30–50 seconds to wake up. Every request
     after that is instant. This is normal, not a bug.
 
-## Worth knowing: no login on this URL
+## Environment variables on Render
 
-The app has no authentication — anyone with the Render URL can view or
-edit shipment data. Fine for an internal tool where the URL isn't shared
-publicly, but worth knowing before handing the link around. If you want a
-simple password gate on it later, that's a small addition (HTTP Basic
-Auth) — ask and it can be added without much fuss.
+| Key | What |
+|---|---|
+| `DATABASE_URL` | Supabase Session Pooler connection string |
+| `POD_UPLOAD_URL` | Web app URL of the Google Apps Script in `apps-script/pod-upload.gs` (POD and ticket photos go to Drive) |
+| `POD_UPLOAD_SECRET` | Same value as the script's `UPLOAD_SECRET` property |
+
+Render sets `RENDER` itself, which lets the server use the live `public`
+schema. Run from any other machine, the server refuses the live schema
+unless `ALLOW_PUBLIC_SCHEMA=1` is set (`DB_SCHEMA=rtv_test` for testing).
+
+## Logins
+
+The app needs a login. Create the first admin once, from a machine with the
+live `DATABASE_URL` (it asks for the password privately):
+
+```powershell
+$env:DB_SCHEMA='public'; $env:ALLOW_PUBLIC_SCHEMA='1'; python rtv-shipment-server.py create-admin <username>
+```
+
+Then sign in and add hub accounts under **Admin → Hub accounts**.
+
+## Upgrades
+
+Every start runs `init_db()`, which only adds tables, columns and indexes
+(`IF NOT EXISTS`) and fills in blanks — existing rows are never changed or
+removed, so the previous version keeps working against an upgraded database
+and a Render rollback is safe.
