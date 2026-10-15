@@ -394,7 +394,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <label for="viewHubSelect">Viewing</label>
       <select id="viewHubSelect"></select>
     </div>
-    <button type="button" class="link-btn hub-only" id="raiseIssueBtn">Raise an Issue</button>
+    <button type="button" class="link-btn" id="raiseIssueBtn">Raise an Issue</button>
     <button type="button" class="link-btn" id="signOutBtn">Sign out</button>
   </div>
 </nav>
@@ -807,7 +807,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <button type="button" class="btn" id="tkSubmit">Raise ticket</button>
   </div>
   <div class="card">
-    <h2>Your hub's tickets</h2>
+    <h2 id="myTkTitle">Your hub's tickets</h2>
     <div class="table-toolbar">
       <div class="stat-row" id="myTkStats"></div>
       <div class="actions">
@@ -3499,19 +3499,25 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       .catch(function (err) { toast("Couldn't load tickets: " + err.message, true); });
   }
 
-  // ---- My tickets (hub) ----
+  // ---- Raise an Issue (anyone; an admin sees only the tickets they raised
+  // here — every hub's tickets are under Raised issues) ----
   function showMyTicketsView() {
     currentTabShow = showMyTicketsView;
     hideAllTabViews();
     document.getElementById("myTicketsView").style.display = "block";
+    document.getElementById("myTkTitle").textContent = isAdmin() ? "Tickets you raised" : "Your hub's tickets";
     loadTickets(renderMyTickets);
+  }
+  function myTickets() {
+    if (!isAdmin()) return allTickets;
+    return allTickets.filter(function (t) { return t.raisedBy === state.me.user.username; });
   }
   document.getElementById("raiseIssueBtn").addEventListener("click", showMyTicketsView);
 
   function filteredMyTickets() {
     var q = document.getElementById("myTkSearch").value.trim().toLowerCase();
     var st = document.getElementById("myTkStatus").value;
-    return allTickets.filter(function (t) {
+    return myTickets().filter(function (t) {
       if (st && t.status !== st) return false;
       return !q || [t.number, t.title, t.description, t.reference, t.category].some(function (x) { return x && x.toLowerCase().indexOf(q) !== -1; });
     });
@@ -3519,7 +3525,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   function renderMyTickets() {
     var rows = filteredMyTickets();
     document.getElementById("myTkStats").innerHTML = ["Open", "In progress", "Solved"].map(function (st) {
-      return "<span><b>" + allTickets.filter(function (t) { return t.status === st; }).length + "</b>" + st + "</span>";
+      return "<span><b>" + myTickets().filter(function (t) { return t.status === st; }).length + "</b>" + st + "</span>";
     }).join("");
     var body = document.getElementById("myTkBody");
     body.innerHTML = "";
@@ -3544,7 +3550,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       }
       body.appendChild(tr);
     });
-    if (!rows.length) body.innerHTML = "<tr><td colspan='8' class='empty-state'>" + (allTickets.length ? "Nothing matches these filters." : "No tickets yet.") + "</td></tr>";
+    if (!rows.length) body.innerHTML = "<tr><td colspan='8' class='empty-state'>" + (myTickets().length ? "Nothing matches these filters." : "No tickets yet.") + "</td></tr>";
   }
   ["myTkSearch", "myTkStatus"].forEach(function (id) {
     document.getElementById(id).addEventListener(id === "myTkSearch" ? "input" : "change", renderMyTickets);
