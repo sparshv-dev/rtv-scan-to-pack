@@ -216,6 +216,12 @@ body:not(.is-admin) .admin-only { display: none !important; }
 .pill.st-Picked, .pill.st-In { color: var(--warn); }
 .pill.st-Delivered { color: var(--good); }
 body.is-admin .hub-only { display: none !important; }
+.month-picker { position: relative; }
+.month-picker-pop { display: none; position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: 230px; max-height: 340px; overflow-y: auto; background: var(--paper-raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px var(--shadow); padding: 8px; }
+.month-picker.is-open .month-picker-pop { display: block; }
+.month-picker-pop label { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.month-picker-pop label:hover { background: var(--zebra); }
+.month-picker-pop .mp-actions { display: flex; justify-content: space-between; padding: 6px 8px 2px; border-top: 1px solid var(--line); margin-top: 4px; }
 .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 18px; }
 .kpi { text-align: left; font: inherit; background: var(--paper-raised); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; cursor: pointer; color: var(--ink); }
 .kpi:hover { border-color: var(--accent); }
@@ -756,14 +762,18 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <p class="eyebrow">Return to Vendor · all hubs</p>
       <h1>Dashboard</h1>
     </div>
-    <div style="display:flex; gap:12px; align-items:center;">
+    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
       <span class="hint" style="margin:0;" id="dashAsOf"></span>
+      <div class="month-picker" id="dashMonthPicker">
+        <button type="button" class="btn small secondary" id="dashMonthBtn" aria-haspopup="true">Months: All time ▾</button>
+        <div class="month-picker-pop" id="dashMonthPop"></div>
+      </div>
       <button type="button" class="btn small secondary" id="dashRefresh">Refresh</button>
     </div>
   </div>
   <div class="kpi-grid" id="dashKpis"></div>
   <div class="card">
-    <h2>Today</h2>
+    <h2 id="dashTodayTitle">Today</h2>
     <div class="today-strip" id="dashToday"></div>
   </div>
   <div class="card">
@@ -772,7 +782,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <div class="actions"><button type="button" class="btn small secondary" id="dashCsv">Download CSV</button></div>
     </div>
     <div class="table-wrap">
-      <table class="data-table dash-hubs"><thead><tr><th>Hub</th><th class="num">To scan 1d</th><th class="num">2d</th><th class="num">3+d</th><th class="num">Waiting gate-out</th><th class="num">Waiting delivery</th><th class="num">Waiting 3+ days</th><th class="num">Mismatch (invoices)</th><th class="num">Courier requests</th><th class="num">Open tickets</th><th class="num">Packed today</th><th class="num">Dispatched today</th><th class="num">Delivered today</th></tr></thead><tbody id="dashHubBody"></tbody></table>
+      <table class="data-table dash-hubs"><thead><tr><th>Hub</th><th class="num">To scan 1d</th><th class="num">2d</th><th class="num">3+d</th><th class="num">Waiting gate-out</th><th class="num">Waiting delivery</th><th class="num">Waiting 3+ days</th><th class="num">Mismatch (invoices)</th><th class="num">Courier requests</th><th class="num">Open tickets</th><th class="num dash-act">Packed today</th><th class="num dash-act">Dispatched today</th><th class="num dash-act">Delivered today</th></tr></thead><tbody id="dashHubBody"></tbody></table>
     </div>
   </div>
   <div class="mini-grid" id="dashMini"></div>
@@ -884,7 +894,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 
   <div class="card">
     <h2>Upload the returns export</h2>
-    <p class="hint">The HMS returns export (CSV or .xlsx). Only the 19 needed columns are kept; every other column in the file is ignored. Re-uploading is safe: an item already in the database is only updated when the file has a newer <b>Updated At</b>, and repeats inside one file count once.</p>
+    <p class="hint">The HMS returns export (CSV or .xlsx). Only the 19 needed columns are kept; every other column in the file is ignored. Rows for seller <b>ZILO SERVICES PRIVATE LIMITED</b> are left out. Re-uploading is safe: an item already in the database is only updated when the file has a newer <b>Updated At</b>, and repeats inside one file count once.</p>
     <input type="file" id="dumpFileInput" accept=".csv,.xlsx,text/csv">
     <p class="field-error" id="dumpError"></p>
     <div id="dumpResult"></div>
@@ -894,7 +904,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <h2>Import history</h2>
     <p class="hint" id="dumpTotals"></p>
     <div class="table-wrap">
-      <table class="data-table"><thead><tr><th>When</th><th>By</th><th>File</th><th>Rows</th><th>New</th><th>Updated</th><th>Unchanged</th><th>Older, skipped</th><th>Repeats</th><th>Blank</th><th>Hubs not matched</th></tr></thead><tbody id="dumpHistoryBody"></tbody></table>
+      <table class="data-table"><thead><tr><th>When</th><th>By</th><th>File</th><th>Rows</th><th>New</th><th>Updated</th><th>Unchanged</th><th>Older, skipped</th><th>Repeats</th><th>Blank</th><th>Zilo rows left out</th><th>Hubs not matched</th></tr></thead><tbody id="dumpHistoryBody"></tbody></table>
     </div>
   </div>
 
@@ -3181,10 +3191,10 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
           "<td class='mono'>" + num(r.totalRows) + "</td><td class='mono'>" + num(r.inserted) + "</td>" +
           "<td class='mono'>" + num(r.updated) + "</td><td class='mono'>" + num(r.unchanged) + "</td>" +
           "<td class='mono'>" + num(r.stale) + "</td><td class='mono'>" + num(r.duplicateRows) + "</td>" +
-          "<td class='mono'>" + num(r.blankRows) + "</td><td>" + escapeHtml(r.unmatchedHubs || "—") + "</td>";
+          "<td class='mono'>" + num(r.blankRows) + "</td><td class='mono'>" + num(r.excludedRows) + "</td><td>" + escapeHtml(r.unmatchedHubs || "—") + "</td>";
         body.appendChild(tr);
       });
-      if (!info.imports.length) body.innerHTML = "<tr><td colspan='11' class='empty-state'>No files imported yet.</td></tr>";
+      if (!info.imports.length) body.innerHTML = "<tr><td colspan='12' class='empty-state'>No files imported yet.</td></tr>";
 
       var un = document.getElementById("dumpUnmatched");
       un.innerHTML = info.returnsWithoutHub.length
@@ -3223,7 +3233,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       .then(function (r) {
         out.innerHTML = "<div class='summary-bar'>" +
           [["New", r.inserted], ["Updated", r.updated], ["Unchanged", r.unchanged], ["Older, skipped", r.stale],
-           ["Repeats in file", r.duplicate_rows], ["Blank rows", r.blank_rows], ["No Return ID", r.invalid_rows]]
+           ["Repeats in file", r.duplicate_rows], ["Blank rows", r.blank_rows], ["Zilo rows left out", r.excluded_rows], ["No Return ID", r.invalid_rows]]
             .map(function (x) { return "<div class='stat'><div class='num mono'>" + num(x[1]) + "</div><div class='lbl'>" + x[0] + "</div></div>"; }).join("") +
           "</div>" + (r.unmatchedHubs.length ? "<p class='field-error'>Hub names not matched to a hub: " + escapeHtml(r.unmatchedHubs.join(", ")) + ". Set them below.</p>" : "");
         toast("Imported " + file.name);
@@ -3671,6 +3681,50 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 
   // ================= admin dashboard =================
   var dashData = null;
+  var dashMonths = []; // selected "YYYY-MM"; empty = all time
+
+  function monthLabel(m) {
+    var d = new Date(m + "-01T00:00:00");
+    return d.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+  }
+  // Last 12 months, newest first (IST).
+  function recentMonths() {
+    var now = new Date(Date.now() + 5.5 * 3600000), out = [];
+    for (var i = 0; i < 12; i++) {
+      var d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+      out.push(d.toISOString().slice(0, 7));
+    }
+    return out;
+  }
+  function renderMonthPicker() {
+    var pop = document.getElementById("dashMonthPop");
+    pop.innerHTML = recentMonths().map(function (m) {
+      return "<label><input type='checkbox' value='" + m + "'" + (dashMonths.indexOf(m) !== -1 ? " checked" : "") + "> " + escapeHtml(monthLabel(m)) + "</label>";
+    }).join("") + "<div class='mp-actions'><button type='button' class='link-btn' id='dashMonthAll'>All time</button><button type='button' class='btn small' id='dashMonthApply'>Apply</button></div>";
+    var btn = document.getElementById("dashMonthBtn");
+    btn.textContent = "Months: " + (dashMonths.length ? (dashMonths.length <= 2 ? dashMonths.slice().sort().map(monthLabel).join(", ") : dashMonths.length + " months") : "All time") + " ▾";
+    document.getElementById("dashMonthAll").addEventListener("click", function () {
+      dashMonths = [];
+      document.getElementById("dashMonthPicker").classList.remove("is-open");
+      renderMonthPicker();
+      loadDashboard();
+    });
+    document.getElementById("dashMonthApply").addEventListener("click", function () {
+      dashMonths = Array.from(pop.querySelectorAll("input:checked")).map(function (c) { return c.value; });
+      document.getElementById("dashMonthPicker").classList.remove("is-open");
+      renderMonthPicker();
+      loadDashboard();
+    });
+  }
+  document.getElementById("dashMonthBtn").addEventListener("click", function (e) {
+    e.stopPropagation();
+    document.getElementById("dashMonthPicker").classList.toggle("is-open");
+  });
+  document.addEventListener("click", function (e) {
+    var picker = document.getElementById("dashMonthPicker");
+    if (picker.classList.contains("is-open") && !picker.contains(e.target)) picker.classList.remove("is-open");
+  });
+  renderMonthPicker();
   function showDashboardView() {
     currentTabShow = showDashboardView;
     hideAllTabViews();
@@ -3685,10 +3739,14 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 
   function loadDashboard() {
     document.getElementById("dashAsOf").textContent = "Loading…";
-    return getJson("/api/dashboard").then(function (d) {
+    return getJson("/api/dashboard" + (dashMonths.length ? "?months=" + encodeURIComponent(dashMonths.join(",")) : "")).then(function (d) {
       dashData = d;
       var t = d.totals;
+      var period = d.months.length ? d.months.map(monthLabel).join(", ") : "";
       document.getElementById("dashAsOf").textContent = "Updated " + formatDateTime(d.asOf);
+      document.getElementById("dashTodayTitle").textContent = period ? "In " + period : "Today";
+      var actLabels = period ? ["Packed", "Dispatched", "Delivered"] : ["Packed today", "Dispatched today", "Delivered today"];
+      document.querySelectorAll("#dashboardView th.dash-act").forEach(function (th, i) { th.textContent = actLabels[i]; });
       var kpis = [
         { k: "Pending to Scan", v: t.pend1 + t.pend2 + t.pend3, sub: "<b class='bad'>" + n(t.pend3) + "</b> at 3+ days · " + n(t.pend2) + " at 2 days", go: function () { showPendencyView("scan"); }, bad: t.pend3 > 0 },
         { k: "Waiting for gate-out", v: t.waitingGateOut, sub: "packed, not dispatched", go: function () { showPendencyView("dispatch"); } },
@@ -3724,7 +3782,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       var mini = [
         ["Daily data", li ? [["Last upload", formatDateTime(li.createdAt)], ["By", li.by], ["Rows", n(li.rows)], ["New / updated", n(li.inserted) + " / " + n(li.updated)]] : [["Last upload", "None yet"]],
           stale ? "<p class='field-error' style='margin:6px 0 0;'>No upload today yet.</p>" : ""],
-        ["Closed in the last 7 days", Object.keys(d.closures7d).map(function (k) { return [k, n(d.closures7d[k])]; }), ""],
+        [period ? "Closed in " + period : "Closed in the last 7 days", Object.keys(d.closures7d).map(function (k) { return [k, n(d.closures7d[k])]; }), ""],
         ["Courier bookings", Object.keys(d.bookings).map(function (k) { return [k, n(d.bookings[k])]; }), ""],
         ["Tickets", Object.keys(d.tickets).map(function (k) { return [k, n(d.tickets[k])]; }), ""],
       ];

@@ -33,6 +33,7 @@ from urllib.parse import urlparse, parse_qs
 from xml.etree import ElementTree
 
 import psycopg2
+import psycopg2.errors
 import psycopg2.extras
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -473,10 +474,12 @@ def init_db():
             inserted INTEGER NOT NULL DEFAULT 0,
             updated INTEGER NOT NULL DEFAULT 0,
             unchanged INTEGER NOT NULL DEFAULT 0,
+            excluded_rows INTEGER NOT NULL DEFAULT 0,
             stale INTEGER NOT NULL DEFAULT 0,
             unmatched_hubs TEXT,
             error TEXT
         );
+        ALTER TABLE dump_imports ADD COLUMN IF NOT EXISTS excluded_rows INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS sku TEXT;
         -- Pendency's second terminal (the first is being packed in the app):
         -- a return item closed by the team with a reason and remarks.
@@ -734,6 +737,12 @@ def file_rows(data, filename):
     return list(csv.reader(io.StringIO(text)))
 
 
+# Zilo's own returns ("ZILO SERVICES PRIVATE LIMITED", any spelling) aren't
+# RTV stock for a brand, so they're left out of the daily data entirely.
+def is_excluded_seller(name):
+    return re.sub(r"[^A-Z]", "", (name or "").upper()).startswith("ZILOSERVICES")
+
+
 def prepare_dump(rows):
     """Header check, column pick, blank/invalid skip and in-file de-duplication.
     Returns (records keyed by (return_tracking_id, sku), stats)."""
@@ -749,7 +758,7 @@ def prepare_dump(rows):
     if missing:
         raise ApiError(400, "This doesn't look like the returns export — missing column(s): " + ", ".join(missing))
 
-    stats = {"total_rows": 0, "blank_rows": 0, "invalid_rows": 0, "duplicate_rows": 0}
+    stats = {"total_rows": 0, "blank_rows": 0, "invalid_rows": 0, "duplicate_rows": 0, "excluded_rows": 0}
     records = {}
     for raw in rows[1:]:
         stats["total_rows"] += 1
@@ -761,6 +770,9 @@ def prepare_dump(rows):
             i = index.get(col)
             v = (raw[i] if i is not None and i < len(raw) else "").strip()
             rec[col] = parse_time(v) if kind == "time" else parse_number(v) if kind == "number" else (v or None)
+        if is_excluded_seller(rec["seller_name"]):
+            stats["excluded_rows"] += 1
+            continue
         if not rec["return_tracking_id"]:
             stats["invalid_rows"] += 1
             continue
@@ -1324,7 +1336,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/pendency":
                 return self.list_pendency()
             if path == "/api/dashboard":
-                return self.dashboard()
+                return self.dashboard((qs.get("months") or [""])[0].strip())
             if path == "/api/tickets":
                 return self.list_tickets()
             if path == "/api/tickets/open-count":
@@ -1828,6 +1840,8 @@ class Handler(BaseHTTPRequestHandler):
 
         records, stats = prepare_dump(file_rows(data, filename))
         if not records:
+            if stats["excluded_rows"]:
+                raise ApiError(400, f"Every row in that file is ZILO SERVICES PRIVATE LIMITED ({stats['excluded_rows']:,} rows) — those are left out, so nothing was imported")
             raise ApiError(400, "No rows with a Return Tracking ID found in that file")
 
         conn = get_db()
@@ -1898,12 +1912,12 @@ class Handler(BaseHTTPRequestHandler):
         conn.execute(
             """
             UPDATE dump_imports SET total_rows = %s, blank_rows = %s, invalid_rows = %s, duplicate_rows = %s,
-                   inserted = %s, updated = %s, unchanged = %s, stale = %s, unmatched_hubs = %s
+                   inserted = %s, updated = %s, unchanged = %s, stale = %s, unmatched_hubs = %s, excluded_rows = %s
             WHERE id = %s
             """,
             (result["total_rows"], result["blank_rows"], result["invalid_rows"], result["duplicate_rows"],
              result["inserted"], result["updated"], result["unchanged"], result["stale"],
-             ", ".join(unmatched) or None, import_id),
+             ", ".join(unmatched) or None, result["excluded_rows"], import_id),
         )
         conn.commit()
         conn.close()
@@ -1926,6 +1940,7 @@ class Handler(BaseHTTPRequestHandler):
                     "id": r["id"], "source": r["source"], "filename": r["filename"], "uploadedBy": r["uploaded_by"],
                     "createdAt": r["created_at"], "totalRows": r["total_rows"], "blankRows": r["blank_rows"],
                     "invalidRows": r["invalid_rows"], "duplicateRows": r["duplicate_rows"], "inserted": r["inserted"],
+                    "excludedRows": r["excluded_rows"],
                     "updated": r["updated"], "unchanged": r["unchanged"], "stale": r["stale"],
                     "unmatchedHubs": r["unmatched_hubs"],
                 }
@@ -2049,8 +2064,21 @@ class Handler(BaseHTTPRequestHandler):
     """
 
     # One call for the admin dashboard: every hub's numbers from each screen.
-    def dashboard(self):
+    # months: "" for all time, else "YYYY-MM,YYYY-MM,..." — each number is
+    # filtered by its own natural date, as calendar months in IST.
+    def dashboard(self, months=""):
         self.require_admin()
+        sel = sorted({m for m in months.split(",") if m})
+        if any(not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", m) for m in sel):
+            raise ApiError(400, "months must look like 2026-10,2026-09")
+
+        def in_months(expr, kind="ts"):
+            """SQL fragment + params limiting expr to the selected months."""
+            if not sel:
+                return "", []
+            col = f"left({expr}, 7)" if kind == "date" else f"to_char(({expr})::timestamptz AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM')"
+            return f" AND {col} = ANY(%s)", [sel]
+
         now = datetime.now(timezone.utc)
         today_ist = now.astimezone(IST).replace(hour=0, minute=0, second=0, microsecond=0)
         today_start = today_ist.astimezone(timezone.utc).isoformat()
@@ -2070,7 +2098,8 @@ class Handler(BaseHTTPRequestHandler):
         for r in conn.execute("SELECT id, name FROM hubs ORDER BY name").fetchall():
             hub(r["id"], r["name"])
 
-        for r in conn.execute(self.PENDENCY_SQL).fetchall():
+        f_sql, f_params = in_months("r.clock_start")
+        for r in conn.execute(self.PENDENCY_SQL + (" WHERE TRUE" + f_sql if sel else ""), tuple(f_params)).fetchall():
             if r["clock_start"] is None:
                 continue
             hours = float(r["age_hours"])
@@ -2082,9 +2111,9 @@ class Handler(BaseHTTPRequestHandler):
                    COUNT(*) FILTER (WHERE dispatched_at IS NULL) AS packed,
                    COUNT(*) FILTER (WHERE dispatched_at IS NOT NULL) AS dispatched,
                    COUNT(*) FILTER (WHERE COALESCE(dispatched_at, created_at) < %s) AS old3
-            FROM shipments WHERE delivered_at IS NULL AND ship_date >= %s GROUP BY hub_id
-            """,
-            (three_days_ago, since),
+            FROM shipments WHERE delivered_at IS NULL AND ship_date >= %s {month_sql} GROUP BY hub_id
+            """.format(month_sql=in_months("ship_date", "date")[0]),
+            (three_days_ago, since, *in_months("ship_date", "date")[1]),
         ).fetchall():
             h = hub(r["hub_id"])
             h["waitingGateOut"], h["waitingDelivery"], h["waiting3d"] = r["packed"], r["dispatched"], r["old3"]
@@ -2100,27 +2129,39 @@ class Handler(BaseHTTPRequestHandler):
                 ORDER BY r.rtv_delivered_at NULLS FIRST LIMIT 1
             ) r ON TRUE
             WHERE s.delivered_at IS NOT NULL AND r.rtv_delivered_at IS NULL
-              AND COALESCE(r.rtv_shipment_status, '') NOT ILIKE '%%deliver%%'
+              AND COALESCE(r.rtv_shipment_status, '') NOT ILIKE '%%deliver%%' {month_sql}
             GROUP BY s.hub_id
-            """
+            """.format(month_sql=in_months("s.delivered_on", "date")[0]),
+            tuple(in_months("s.delivered_on", "date")[1]),
         ).fetchall():
             h = hub(r["hub_id"])
             h["mismatchInvoices"], h["mismatchReturns"] = r["invoices"], r["returns"]
 
         bookings = {st: 0 for st in COURIER_BOOKING_STATUSES}
-        for r in conn.execute("SELECT hub_id, status, COUNT(*) AS n FROM courier_bookings GROUP BY hub_id, status").fetchall():
+        f_sql, f_params = in_months("created_at")
+        for r in conn.execute("SELECT hub_id, status, COUNT(*) AS n FROM courier_bookings WHERE TRUE" + f_sql + " GROUP BY hub_id, status", tuple(f_params)).fetchall():
             bookings[r["status"]] = bookings.get(r["status"], 0) + r["n"]
             if r["status"] == "Requested":
                 hub(r["hub_id"])["requestedBookings"] += r["n"]
 
         tickets = {st: 0 for st in TICKET_STATUSES}
-        for r in conn.execute("SELECT hub_id, status, COUNT(*) AS n FROM tickets GROUP BY hub_id, status").fetchall():
+        f_sql, f_params = in_months("raised_at")
+        for r in conn.execute("SELECT hub_id, status, COUNT(*) AS n FROM tickets WHERE TRUE" + f_sql + " GROUP BY hub_id, status", tuple(f_params)).fetchall():
             tickets[r["status"]] += r["n"]
             if r["status"] != "Solved":
                 hub(r["hub_id"])["openTickets"] += r["n"]
 
-        for r in conn.execute(
-            """
+        if sel:
+            m = "to_char(({c})::timestamptz AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') = ANY(%s)"
+            activity_sql = (
+                "SELECT hub_id, COUNT(*) FILTER (WHERE " + m.format(c="created_at") + ") AS packed, "
+                "COUNT(*) FILTER (WHERE dispatched_at IS NOT NULL AND " + m.format(c="dispatched_at") + ") AS dispatched, "
+                "COUNT(*) FILTER (WHERE delivered_at IS NOT NULL AND " + m.format(c="delivered_at") + ") AS delivered "
+                "FROM shipments GROUP BY hub_id"
+            )
+            activity_params = (sel, sel, sel)
+        else:
+            activity_sql = """
             SELECT hub_id,
                    COUNT(*) FILTER (WHERE created_at >= %s) AS packed,
                    COUNT(*) FILTER (WHERE dispatched_at >= %s) AS dispatched,
@@ -2128,14 +2169,18 @@ class Handler(BaseHTTPRequestHandler):
             FROM shipments
             WHERE created_at >= %s OR dispatched_at >= %s OR delivered_at >= %s
             GROUP BY hub_id
-            """,
-            (today_start,) * 6,
-        ).fetchall():
+            """
+            activity_params = (today_start,) * 6
+        for r in conn.execute(activity_sql, activity_params).fetchall():
             h = hub(r["hub_id"])
             h["packedToday"], h["dispatchedToday"], h["deliveredToday"] = r["packed"], r["dispatched"], r["delivered"]
 
         closures = {rs: 0 for rs in CLOSURE_REASONS}
-        for r in conn.execute("SELECT reason, COUNT(*) AS n FROM return_closures WHERE closed_at >= %s GROUP BY reason", (week_ago,)).fetchall():
+        if sel:
+            c_sql, c_params = "SELECT reason, COUNT(*) AS n FROM return_closures WHERE TRUE" + in_months("closed_at")[0] + " GROUP BY reason", tuple(in_months("closed_at")[1])
+        else:
+            c_sql, c_params = "SELECT reason, COUNT(*) AS n FROM return_closures WHERE closed_at >= %s GROUP BY reason", (week_ago,)
+        for r in conn.execute(c_sql, c_params).fetchall():
             closures[r["reason"]] = r["n"]
 
         last = conn.execute("SELECT * FROM dump_imports ORDER BY id DESC LIMIT 1").fetchone()
@@ -2145,7 +2190,7 @@ class Handler(BaseHTTPRequestHandler):
         rows = [h for h in rows if h["id"] is not None or any(h[k] for k in keys)]
         totals = {k: sum(h[k] for h in rows) for k in keys}
         self.send_json(200, {
-            "asOf": now.isoformat(), "trackingFrom": since, "hubs": rows, "totals": totals,
+            "asOf": now.isoformat(), "trackingFrom": since, "hubs": rows, "totals": totals, "months": sel,
             "bookings": bookings, "tickets": tickets, "closures7d": closures,
             "lastImport": {
                 "createdAt": last["created_at"], "by": last["uploaded_by"], "filename": last["filename"],
@@ -3210,6 +3255,22 @@ def create_admin(username):
     print(f"Admin '{username}' created in schema '{db_schema()}'.")
 
 
+def init_db_with_retry(attempts=4):
+    # During a deploy the previous instance is still serving requests, so the
+    # startup ALTER/CREATE statements can briefly deadlock with its writes.
+    # Postgres cancels one side; try again rather than failing the deploy.
+    for i in range(attempts):
+        try:
+            return init_db()
+        except (psycopg2.errors.DeadlockDetected, psycopg2.errors.LockNotAvailable) as e:
+            release_request_dbs()  # hand the failed attempt's connection back
+            if i == attempts - 1:
+                raise
+            wait = 3 * (i + 1)
+            print(f"Database busy during startup ({type(e).__name__}); retrying in {wait}s")
+            time.sleep(wait)
+
+
 def main():
     load_dotenv()
     schema = db_schema()
@@ -3229,7 +3290,7 @@ def main():
             sys.exit(e.message)
         return
     port = int(os.environ.get("PORT") or (sys.argv[1] if len(sys.argv) > 1 else DEFAULT_PORT))
-    init_db()
+    init_db_with_retry()
     print(f"Database schema: {schema}")
     # Threaded: browsers open idle pre-connections, which would block a
     # single-threaded server for every other user until they time out.
