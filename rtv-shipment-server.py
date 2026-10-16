@@ -2984,6 +2984,8 @@ class Handler(BaseHTTPRequestHandler):
         ("tracking", "Tracking"),
         ("codToPay", "COD/To Pay"),
         ("pickupDate", "Pick Date (Tentative)"),
+        # Not part of DTDC's template, so it goes last and leaves theirs intact.
+        ("addedOn", "Added On (IST)"),
     ]
 
     # status/q mirror the same filters the Bookings table applies on screen,
@@ -3024,6 +3026,11 @@ class Handler(BaseHTTPRequestHandler):
             return s
 
         dicts = [courier_booking_to_dict(r) for r in rows]
+        for d in dicts:
+            try:
+                d["addedOn"] = datetime.fromisoformat(d["createdAt"]).astimezone(IST).strftime("%d-%m-%Y %H:%M")
+            except (TypeError, ValueError):
+                d["addedOn"] = d.get("createdAt")
         if status:
             dicts = [d for d in dicts if d.get("status") == status]
         if q:

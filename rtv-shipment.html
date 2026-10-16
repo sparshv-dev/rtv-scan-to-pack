@@ -620,7 +620,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     </div>
     <div class="table-wrap">
       <table class="data-table">
-        <thead><tr><th>Pickup date</th><th>Hub</th><th>Brand</th><th>Store</th><th>Destination name</th><th class="num-col">Boxes</th><th class="num-col">Declared price</th><th class="num-col">Weight (KG)</th><th>Invoice(s)</th><th>Status</th><th>Tracking</th><th>Report</th><th></th></tr></thead>
+        <thead><tr><th>Added on</th><th>Pickup date</th><th>Hub</th><th>Brand</th><th>Store</th><th>Destination name</th><th class="num-col">Boxes</th><th class="num-col">Declared price</th><th class="num-col">Weight (KG)</th><th>Invoice(s)</th><th>Status</th><th>Tracking</th><th>Report</th><th></th></tr></thead>
         <tbody id="cbBookingsBody"></tbody>
       </table>
     </div>
@@ -2981,6 +2981,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     bookings.forEach(function (b) {
         var tr = document.createElement("tr");
         tr.innerHTML =
+          "<td class='mono' style='white-space:nowrap'>" + escapeHtml(b.createdAt ? formatDateTime(b.createdAt) : "") + "</td>" +
           "<td>" + escapeHtml(b.pickupDate) + "</td>" +
           "<td>" + escapeHtml(b.hubName || "") + "</td>" +
           "<td>" + escapeHtml(brandPrefix(b.vendorName)) + "</td>" +
@@ -2995,7 +2996,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
           "<td></td>" +
           "<td></td>";
 
-        var statusCell = tr.children[9];
+        var statusCell = tr.children[10];
         if (!isAdmin()) {
           // Hubs see the status; only admins change it.
           statusCell.innerHTML = "<span class='pill st-" + escapeHtml(b.status.split(" ")[0]) + "'>" + escapeHtml(b.status) + "</span>";
@@ -3025,7 +3026,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         statusCell.appendChild(statusSelect);
         }
 
-        var trackingCell = tr.children[10];
+        var trackingCell = tr.children[11];
         if (!isAdmin()) {
           trackingCell.innerHTML = b.tracking ? "<span class='mono'>" + escapeHtml(b.tracking) + "</span>" : "<span class='hint' style='margin:0;'>Not yet</span>";
         } else {
@@ -3057,7 +3058,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         reportLink.className = "link-btn";
         reportLink.textContent = "Download CSV";
         reportLink.setAttribute("download", "");
-        tr.children[11].appendChild(reportLink);
+        tr.children[12].appendChild(reportLink);
 
         // Admins can delete any booking; a hub can cancel its own while it's
         // still only Requested (not yet with DTDC).
