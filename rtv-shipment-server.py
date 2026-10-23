@@ -1366,9 +1366,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/courier-bookings/requested-count":
                 return self.requested_bookings_count()
             if path == "/api/courier-bookings/export":
-                status_filter = (qs.get("status") or [""])[0].strip()
                 q_filter = (qs.get("q") or [""])[0].strip()
-                return self.export_courier_bookings_csv(status_filter or None, q_filter or None)
+                return self.export_courier_bookings_csv(q_filter or None)
             if path == "/api/courier-bookings/report":
                 date_str = (qs.get("date") or [""])[0].strip()
                 return self.get_courier_bookings_report(date_str)
@@ -2988,12 +2987,12 @@ class Handler(BaseHTTPRequestHandler):
         ("addedOn", "Added On (IST)"),
     ]
 
-    # status/q mirror the same filters the Bookings table applies on screen,
-    # so "export what I'm looking at" (e.g. only "Shared with DTDC" rows)
-    # does what it looks like it should. Filtered in Python, not SQL — the
+    # Only "Requested" bookings go in — the file is what gets sent to DTDC,
+    # so anything already shared or further along must never be re-sent.
+    # q mirrors the search box on screen. Filtered in Python, not SQL — the
     # invoice list is a string_agg across a GROUP BY, so it's simpler and
     # just as fast at this table's size to filter the already-built dicts.
-    def export_courier_bookings_csv(self, status=None, q=None):
+    def export_courier_bookings_csv(self, q=None):
         hub_sql, hub_params = self.hub_filter("b.hub_id")
         conn = get_db()
         rows = conn.execute(
@@ -3031,8 +3030,7 @@ class Handler(BaseHTTPRequestHandler):
                 d["addedOn"] = datetime.fromisoformat(d["createdAt"]).astimezone(IST).strftime("%d-%m-%Y %H:%M")
             except (TypeError, ValueError):
                 d["addedOn"] = d.get("createdAt")
-        if status:
-            dicts = [d for d in dicts if d.get("status") == status]
+        dicts = [d for d in dicts if d.get("status") == "Requested"]
         if q:
             q_lower = q.lower()
             search_fields = ("pickupDate", "vendorName", "destinationName", "invoiceNumbers", "status", "tracking")

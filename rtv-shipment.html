@@ -605,7 +605,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 
   <div class="card">
     <h2>Bookings</h2>
-    <p class="hint admin-only">To send DTDC the new requests: filter <b>Requested</b> → <b>Export CSV (DTDC format)</b> → share the file → <b>Mark shown as Shared with DTDC</b>. Export downloads whatever the filters match.</p>
+    <p class="hint admin-only">To send DTDC the new requests: filter <b>Requested</b> → <b>Export CSV (DTDC format)</b> → share the file → <b>Mark shown as Shared with DTDC</b>. The export only ever includes <b>Requested</b> bookings (narrowed by the search box, if used).</p>
     <div class="table-toolbar">
       <div class="stat-row" id="cbStats"></div>
       <div class="actions">
@@ -3107,9 +3107,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   document.getElementById("cbExportBtn").addEventListener("click", function (e) {
     e.preventDefault();
     var params = new URLSearchParams();
-    var status = document.getElementById("cbBookingsStatusFilter").value;
     var q = document.getElementById("cbBookingsSearch").value.trim();
-    if (status) params.set("status", status);
     if (q) params.set("q", q);
     var qs = params.toString();
     triggerDownload("/api/courier-bookings/export" + (qs ? "?" + qs : ""));
