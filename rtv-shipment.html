@@ -513,7 +513,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <p class="hint">Every shipment ever packed, newest first. Reopen any of them to reprint its box labels or invoice copies.</p>
     <div class="field" style="margin-bottom:14px;">
       <label for="archiveSearch">Search</label>
-      <input id="archiveSearch" placeholder="Invoice number, vendor or hub…" autocomplete="off">
+      <input id="archiveSearch" placeholder="Invoice number, tracking ID, vendor or hub…" autocomplete="off">
     </div>
     <div class="table-wrap">
       <table class="data-table"><thead><tr><th>Invoice No.</th><th>Ship date</th><th>Hub</th><th>Vendor</th><th>Boxes</th><th>Units</th><th>Amount</th><th>Status</th><th class="admin-only"></th></tr></thead><tbody id="archiveBody"></tbody></table>
@@ -2748,6 +2748,13 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
             .catch(function (err) { toast("Couldn't open shipment: " + err.message, true); });
         });
         td0.appendChild(link);
+        if (s.matchedTracking && s.matchedTracking.length) {
+          var hit = document.createElement("div");
+          hit.className = "hint mono";
+          hit.style.margin = "4px 0 0";
+          hit.textContent = s.matchedTracking.map(function (m) { return m.trackingId + " (box " + m.boxNo + ")"; }).join(", ");
+          td0.appendChild(hit);
+        }
         tr.appendChild(td0);
         tr.insertAdjacentHTML("beforeend",
           "<td>" + escapeHtml(s.shipDate) + "</td>" +

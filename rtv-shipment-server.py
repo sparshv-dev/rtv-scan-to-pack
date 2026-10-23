@@ -1968,18 +1968,33 @@ class Handler(BaseHTTPRequestHandler):
     # ---------- shipments ----------
     # Full history for the Shipment Archive tab — no practical cap, with
     # (capped at 200, backs the small "recent shipments" widget), this has no
-    # practical cap and supports a free-text search across invoice/vendor/hub.
+    # practical cap and supports a free-text search across invoice/vendor/hub
+    # and the tracking IDs packed inside each invoice. A tracking-ID hit adds
+    # matchedTracking (ID + box) so the row shows why that invoice came up.
     def list_shipments_archive(self, q):
         hub_sql, params = self.hub_filter("s.hub_id")
         conn = get_db()
         where_sql = "WHERE TRUE" + hub_sql
         if q:
-            where_sql += " AND (s.invoice_no ILIKE %s OR v.name ILIKE %s OR h.name ILIKE %s)"
+            where_sql += (" AND (s.invoice_no ILIKE %s OR v.name ILIKE %s OR h.name ILIKE %s"
+                          " OR EXISTS (SELECT 1 FROM shipment_items si WHERE si.shipment_id = s.id AND si.tracking_id ILIKE %s))")
             like = f"%{q}%"
-            params += [like, like, like]
+            params += [like, like, like, like]
         rows = conn.execute(SHIPMENT_LIST_SQL + where_sql + " ORDER BY s.id DESC LIMIT 5000", tuple(params)).fetchall()
+        result = [shipment_list_dict(r) for r in rows]
+        if q and result:
+            matches = {}
+            for m in conn.execute(
+                "SELECT shipment_id, tracking_id, box_no FROM shipment_items "
+                "WHERE tracking_id ILIKE %s AND shipment_id = ANY(%s) ORDER BY box_no, tracking_id",
+                (f"%{q}%", [d["id"] for d in result]),
+            ).fetchall():
+                matches.setdefault(m["shipment_id"], []).append({"trackingId": m["tracking_id"], "boxNo": m["box_no"]})
+            for d in result:
+                if d["id"] in matches:
+                    d["matchedTracking"] = matches[d["id"]]
         conn.close()
-        self.send_json(200, [shipment_list_dict(r) for r in rows])
+        self.send_json(200, result)
 
     # status: packed | dispatched | delivered. since (YYYY-MM-DD, IST) limits
     # to invoices dispatched/delivered on or after that day.
