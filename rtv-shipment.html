@@ -2291,7 +2291,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     scannedTrackingIds.add(item.tracking);
     renderCurrentBox();
     renderClosedBoxes();
-    toast("Added " + item.tracking + (item.sku ? " (" + item.sku + ")" : "") + " — " + formatMoney(item.value));
+    toast("Added " + item.tracking + (item.sku ? " (" + item.sku + ")" : "") + " — " + formatMoney(item.value) +
+      (item.returnLocationName ? " · Return Location - " + item.returnLocationName : ""));
   }
 
   document.getElementById("closeBoxBtn").addEventListener("click", function () {
@@ -2560,7 +2561,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
           // Found — value is known and the brand is fixed for this box, so
           // every SKU on the return goes straight in.
           o.data.items.forEach(function (it) {
-            addItemToBox({ tracking: tracking, sku: it.sku, value: it.value, qty: 1 }, currentVendor);
+            addItemToBox({ tracking: tracking, sku: it.sku, value: it.value, qty: 1, returnLocationName: it.returnLocationName }, currentVendor);
           });
           var hub = packingHub();
           var notes = [];

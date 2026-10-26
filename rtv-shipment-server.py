@@ -1795,6 +1795,7 @@ class Handler(BaseHTTPRequestHandler):
                     {
                         "sku": r["sku"], "value": float(r["sale_price"] or 0), "brand": r["seller_name"],
                         "returnType": r["return_type"], "returnStatus": r["return_status"],
+                        "returnLocationName": r["return_location_name"],
                         "hubId": r["hub_id"], "hubName": r["hub_display"] or r["hub_name"],
                         "closedReason": r["closed_reason"], "closedAt": r["closed_at"], "closedBy": r["closed_by"],
                     }
