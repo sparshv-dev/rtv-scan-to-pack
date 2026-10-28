@@ -463,6 +463,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       </div>
     </div>
     <p class="field-error" id="scanError"></p>
+    <div class="scan-result" id="scanResult"></div>
 
     <div class="inline-form" id="pendingItemForm" style="margin-top:4px;">
       <div class="field"><label>Tracking ID</label><input id="pi-tracking" disabled></div>
@@ -2546,6 +2547,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     scanInputEl.value = "";
     if (!tracking) return;
     document.getElementById("scanError").textContent = "";
+    document.getElementById("scanResult").className = "scan-result";
     if (scannedTrackingIds.has(tracking)) {
       toast(tracking + " was already scanned into this session", true);
       return;
@@ -2563,6 +2565,13 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
           o.data.items.forEach(function (it) {
             addItemToBox({ tracking: tracking, sku: it.sku, value: it.value, qty: 1, returnLocationName: it.returnLocationName }, currentVendor);
           });
+          // Stays on screen until the next scan, unlike the toast.
+          var locations = o.data.items.map(function (it) { return it.returnLocationName; })
+            .filter(function (n, i, all) { return n && all.indexOf(n) === i; });
+          var resultEl = document.getElementById("scanResult");
+          resultEl.className = "scan-result is-ok";
+          resultEl.innerHTML = "<div class='big'>Added · " + escapeHtml(tracking) + "</div>" +
+            (locations.length ? "Return Location - " + escapeHtml(locations.join(", ")) : "No return location in the daily data");
           var hub = packingHub();
           var notes = [];
           var other = o.data.items.find(function (it) { return it.hubId && hub && it.hubId !== hub.id; });
@@ -2623,6 +2632,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     })).then(function (entries) {
       toast("Created " + entries.length + " shipment" + (entries.length === 1 ? "" : "s"));
       currentBox = []; closedBoxes = []; boxNo = 1; scannedTrackingIds = new Set();
+      document.getElementById("scanResult").className = "scan-result";
       renderCurrentBox(); renderClosedBoxes();
       openBatchView(entries);
     }).catch(function (err) {
