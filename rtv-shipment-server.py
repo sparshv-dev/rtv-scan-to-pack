@@ -1336,7 +1336,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/pendency":
                 return self.list_pendency()
             if path == "/api/dashboard":
-                return self.dashboard((qs.get("months") or [""])[0].strip())
+                return self.dashboard((qs.get("months") or [""])[0].strip(), (qs.get("hubs") or [""])[0].strip(),
+                                      (qs.get("location") or [""])[0].strip())
+            if path == "/api/daily-report":
+                return self.daily_report((qs.get("date") or [""])[0].strip(), (qs.get("hubs") or [""])[0].strip())
             if path == "/api/tickets":
                 return self.list_tickets()
             if path == "/api/tickets/open-count":
@@ -2081,11 +2084,35 @@ class Handler(BaseHTTPRequestHandler):
     # One call for the admin dashboard: every hub's numbers from each screen.
     # months: "" for all time, else "YYYY-MM,YYYY-MM,..." — each number is
     # filtered by its own natural date, as calendar months in IST.
-    def dashboard(self, months=""):
+    # hubs: "" for every hub, else "1,4,6". location: "", "Local" or
+    # "Non-Local" — the brand's return location. Only numbers tied to a
+    # brand (anything packed, plus courier bookings) can be split that way;
+    # returns still to scan, tickets and closures have no brand yet, so they
+    # come back as null under a location filter (listed in "notSplit").
+    def dashboard(self, months="", hub_ids="", location=""):
         self.require_admin()
         sel = sorted({m for m in months.split(",") if m})
         if any(not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", m) for m in sel):
             raise ApiError(400, "months must look like 2026-10,2026-09")
+        try:
+            hubs_sel = sorted({int(x) for x in hub_ids.split(",") if x.strip()})
+        except ValueError:
+            raise ApiError(400, "hubs must be a comma-separated list of hub IDs")
+        if location not in ("", "Local", "Non-Local"):
+            raise ApiError(400, "location must be Local or Non-Local")
+
+        def hub_f(col):
+            return (f" AND {col} = ANY(%s)", [hubs_sel]) if hubs_sel else ("", [])
+
+        def loc_f(col):
+            return (f" AND {col} IN (SELECT id FROM vendors WHERE return_location = %s)", [location]) if location else ("", [])
+
+        def filters(hub_col, vendor_col=None):
+            h_sql, h_params = hub_f(hub_col)
+            l_sql, l_params = loc_f(vendor_col) if vendor_col else ("", [])
+            return h_sql + l_sql, h_params + l_params
+
+        not_split = ["pend1", "pend2", "pend3", "openTickets"] if location else []
 
         def in_months(expr, kind="ts"):
             """SQL fragment + params limiting expr to the selected months."""
@@ -2110,25 +2137,29 @@ class Handler(BaseHTTPRequestHandler):
                 hubs[hid] = dict({"id": hid, "name": name}, **{k: 0 for k in keys})
             return hubs[hid]
 
-        for r in conn.execute("SELECT id, name FROM hubs ORDER BY name").fetchall():
+        h_sql, h_params = hub_f("id")
+        for r in conn.execute("SELECT id, name FROM hubs WHERE TRUE" + h_sql + " ORDER BY name", tuple(h_params)).fetchall():
             hub(r["id"], r["name"])
 
-        f_sql, f_params = in_months("r.clock_start")
-        for r in conn.execute(self.PENDENCY_SQL + (" WHERE TRUE" + f_sql if sel else ""), tuple(f_params)).fetchall():
-            if r["clock_start"] is None:
-                continue
-            hours = float(r["age_hours"])
-            hub(r["hub_id"])["pend1" if hours < 24 else "pend2" if hours < 48 else "pend3"] += 1
+        if not location:
+            f_sql, f_params = in_months("r.clock_start")
+            x_sql, x_params = filters("r.hub_id")
+            for r in conn.execute(self.PENDENCY_SQL + " WHERE TRUE" + f_sql + x_sql, tuple(f_params + x_params)).fetchall():
+                if r["clock_start"] is None:
+                    continue
+                hours = float(r["age_hours"])
+                hub(r["hub_id"])["pend1" if hours < 24 else "pend2" if hours < 48 else "pend3"] += 1
 
+        x_sql, x_params = filters("hub_id", "vendor_id")
         for r in conn.execute(
             """
             SELECT hub_id,
                    COUNT(*) FILTER (WHERE dispatched_at IS NULL) AS packed,
                    COUNT(*) FILTER (WHERE dispatched_at IS NOT NULL) AS dispatched,
                    COUNT(*) FILTER (WHERE COALESCE(dispatched_at, created_at) < %s) AS old3
-            FROM shipments WHERE delivered_at IS NULL AND ship_date >= %s {month_sql} GROUP BY hub_id
-            """.format(month_sql=in_months("ship_date", "date")[0]),
-            (three_days_ago, since, *in_months("ship_date", "date")[1]),
+            FROM shipments WHERE delivered_at IS NULL AND ship_date >= %s {month_sql}{x_sql} GROUP BY hub_id
+            """.format(month_sql=in_months("ship_date", "date")[0], x_sql=x_sql),
+            (three_days_ago, since, *in_months("ship_date", "date")[1], *x_params),
         ).fetchall():
             h = hub(r["hub_id"])
             h["waitingGateOut"], h["waitingDelivery"], h["waiting3d"] = r["packed"], r["dispatched"], r["old3"]
@@ -2144,37 +2175,41 @@ class Handler(BaseHTTPRequestHandler):
                 ORDER BY r.rtv_delivered_at NULLS FIRST LIMIT 1
             ) r ON TRUE
             WHERE s.delivered_at IS NOT NULL AND r.rtv_delivered_at IS NULL
-              AND COALESCE(r.rtv_shipment_status, '') NOT ILIKE '%%deliver%%' {month_sql}
+              AND COALESCE(r.rtv_shipment_status, '') NOT ILIKE '%%deliver%%' {month_sql}{x_sql}
             GROUP BY s.hub_id
-            """.format(month_sql=in_months("s.delivered_on", "date")[0]),
-            tuple(in_months("s.delivered_on", "date")[1]),
+            """.format(month_sql=in_months("s.delivered_on", "date")[0], x_sql=filters("s.hub_id", "s.vendor_id")[0]),
+            tuple(in_months("s.delivered_on", "date")[1] + filters("s.hub_id", "s.vendor_id")[1]),
         ).fetchall():
             h = hub(r["hub_id"])
             h["mismatchInvoices"], h["mismatchReturns"] = r["invoices"], r["returns"]
 
         bookings = {st: 0 for st in COURIER_BOOKING_STATUSES}
         f_sql, f_params = in_months("created_at")
-        for r in conn.execute("SELECT hub_id, status, COUNT(*) AS n FROM courier_bookings WHERE TRUE" + f_sql + " GROUP BY hub_id, status", tuple(f_params)).fetchall():
+        x_sql, x_params = filters("hub_id", "vendor_id")
+        for r in conn.execute("SELECT hub_id, status, COUNT(*) AS n FROM courier_bookings WHERE TRUE" + f_sql + x_sql + " GROUP BY hub_id, status", tuple(f_params + x_params)).fetchall():
             bookings[r["status"]] = bookings.get(r["status"], 0) + r["n"]
             if r["status"] == "Requested":
                 hub(r["hub_id"])["requestedBookings"] += r["n"]
 
         tickets = {st: 0 for st in TICKET_STATUSES}
-        f_sql, f_params = in_months("raised_at")
-        for r in conn.execute("SELECT hub_id, status, COUNT(*) AS n FROM tickets WHERE TRUE" + f_sql + " GROUP BY hub_id, status", tuple(f_params)).fetchall():
-            tickets[r["status"]] += r["n"]
-            if r["status"] != "Solved":
-                hub(r["hub_id"])["openTickets"] += r["n"]
+        if not location:
+            f_sql, f_params = in_months("raised_at")
+            x_sql, x_params = filters("hub_id")
+            for r in conn.execute("SELECT hub_id, status, COUNT(*) AS n FROM tickets WHERE TRUE" + f_sql + x_sql + " GROUP BY hub_id, status", tuple(f_params + x_params)).fetchall():
+                tickets[r["status"]] += r["n"]
+                if r["status"] != "Solved":
+                    hub(r["hub_id"])["openTickets"] += r["n"]
 
+        x_sql, x_params = filters("hub_id", "vendor_id")
         if sel:
             m = "to_char(({c})::timestamptz AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') = ANY(%s)"
             activity_sql = (
                 "SELECT hub_id, COUNT(*) FILTER (WHERE " + m.format(c="created_at") + ") AS packed, "
                 "COUNT(*) FILTER (WHERE dispatched_at IS NOT NULL AND " + m.format(c="dispatched_at") + ") AS dispatched, "
                 "COUNT(*) FILTER (WHERE delivered_at IS NOT NULL AND " + m.format(c="delivered_at") + ") AS delivered "
-                "FROM shipments GROUP BY hub_id"
+                "FROM shipments WHERE TRUE" + x_sql + " GROUP BY hub_id"
             )
-            activity_params = (sel, sel, sel)
+            activity_params = (sel, sel, sel, *x_params)
         else:
             activity_sql = """
             SELECT hub_id,
@@ -2182,21 +2217,23 @@ class Handler(BaseHTTPRequestHandler):
                    COUNT(*) FILTER (WHERE dispatched_at >= %s) AS dispatched,
                    COUNT(*) FILTER (WHERE delivered_at >= %s) AS delivered
             FROM shipments
-            WHERE created_at >= %s OR dispatched_at >= %s OR delivered_at >= %s
+            WHERE (created_at >= %s OR dispatched_at >= %s OR delivered_at >= %s) {x_sql}
             GROUP BY hub_id
-            """
-            activity_params = (today_start,) * 6
+            """.format(x_sql=x_sql)
+            activity_params = (today_start,) * 6 + tuple(x_params)
         for r in conn.execute(activity_sql, activity_params).fetchall():
             h = hub(r["hub_id"])
             h["packedToday"], h["dispatchedToday"], h["deliveredToday"] = r["packed"], r["dispatched"], r["delivered"]
 
         closures = {rs: 0 for rs in CLOSURE_REASONS}
+        x_sql, x_params = filters("hub_id")
         if sel:
-            c_sql, c_params = "SELECT reason, COUNT(*) AS n FROM return_closures WHERE TRUE" + in_months("closed_at")[0] + " GROUP BY reason", tuple(in_months("closed_at")[1])
+            c_sql, c_params = "SELECT reason, COUNT(*) AS n FROM return_closures WHERE TRUE" + in_months("closed_at")[0] + x_sql + " GROUP BY reason", tuple(in_months("closed_at")[1] + x_params)
         else:
-            c_sql, c_params = "SELECT reason, COUNT(*) AS n FROM return_closures WHERE closed_at >= %s GROUP BY reason", (week_ago,)
-        for r in conn.execute(c_sql, c_params).fetchall():
-            closures[r["reason"]] = r["n"]
+            c_sql, c_params = "SELECT reason, COUNT(*) AS n FROM return_closures WHERE closed_at >= %s" + x_sql + " GROUP BY reason", (week_ago, *x_params)
+        if not location:
+            for r in conn.execute(c_sql, c_params).fetchall():
+                closures[r["reason"]] = r["n"]
 
         last = conn.execute("SELECT * FROM dump_imports ORDER BY id DESC LIMIT 1").fetchone()
         conn.close()
@@ -2204,13 +2241,103 @@ class Handler(BaseHTTPRequestHandler):
         rows = sorted(hubs.values(), key=lambda h: (h["name"] == "Hub not matched", h["name"]))
         rows = [h for h in rows if h["id"] is not None or any(h[k] for k in keys)]
         totals = {k: sum(h[k] for h in rows) for k in keys}
+        for k in not_split:
+            totals[k] = None
+            for h in rows:
+                h[k] = None
         self.send_json(200, {
             "asOf": now.isoformat(), "trackingFrom": since, "hubs": rows, "totals": totals, "months": sel,
-            "bookings": bookings, "tickets": tickets, "closures7d": closures,
+            "hubIds": hubs_sel, "location": location, "notSplit": not_split,
+            "bookings": bookings, "tickets": None if location else tickets, "closures7d": None if location else closures,
             "lastImport": {
                 "createdAt": last["created_at"], "by": last["uploaded_by"], "filename": last["filename"],
                 "rows": last["total_rows"] - last["blank_rows"], "inserted": last["inserted"], "updated": last["updated"],
             } if last else None,
+        })
+
+    def daily_report(self, day="", hub_ids=""):
+        """Admin daily report: shipments (distinct return tracking IDs) packed,
+        gate-out scanned and delivered on one IST day, per hub, plus a 14-day
+        trend. Packed = invoice created; gate-out = invoice dispatched_at;
+        delivered = the delivery date the store entered (delivered_on)."""
+        self.require_admin()
+        today = datetime.now(IST).date()
+        try:
+            day = datetime.strptime(day, "%Y-%m-%d").date() if day else today
+        except ValueError:
+            raise ApiError(400, "date must look like 2026-11-13")
+        if day > today:
+            raise ApiError(400, "That date is in the future")
+        try:
+            hubs_sel = sorted({int(x) for x in hub_ids.split(",") if x.strip()})
+        except ValueError:
+            raise ApiError(400, "hubs must be a comma-separated list of hub IDs")
+
+        trend_end = min(day + timedelta(days=7), today)
+        trend_start = trend_end - timedelta(days=13)
+        prev_day = day - timedelta(days=1)
+        start = min(trend_start, prev_day)
+        end = max(trend_end, day)
+        hub_sql, hub_params = (" AND s.hub_id = ANY(%s)", [hubs_sel]) if hubs_sel else ("", [])
+        # created_at / dispatched_at are UTC ISO strings: a one-day-earlier
+        # string bound is a safe superset of the IST window and keeps it cheap.
+        loose = (start - timedelta(days=1)).isoformat()
+
+        conn = get_db()
+        hub_rows = conn.execute("SELECT id, name, code FROM hubs ORDER BY name").fetchall()
+        rows = conn.execute(
+            """
+            WITH items AS (
+                SELECT s.hub_id, s.id AS sid, si.tracking_id, si.box_no,
+                       (s.created_at::timestamptz AT TIME ZONE 'Asia/Kolkata')::date AS packed_day,
+                       (s.dispatched_at::timestamptz AT TIME ZONE 'Asia/Kolkata')::date AS gate_day,
+                       CASE WHEN s.delivered_at IS NOT NULL THEN NULLIF(s.delivered_on, '')::date END AS deliv_day
+                FROM shipments s
+                JOIN shipment_items si ON si.shipment_id = s.id
+                WHERE (s.created_at >= %s OR s.dispatched_at >= %s OR s.delivered_on >= %s) {hub_sql}
+            )
+            SELECT hub_id, 'packed' AS kind, packed_day AS day, COUNT(DISTINCT tracking_id) AS n,
+                   COUNT(DISTINCT (sid, box_no)) AS boxes
+            FROM items WHERE packed_day BETWEEN %s AND %s GROUP BY hub_id, packed_day
+            UNION ALL
+            SELECT hub_id, 'gateout', gate_day, COUNT(DISTINCT tracking_id), 0
+            FROM items WHERE gate_day BETWEEN %s AND %s GROUP BY hub_id, gate_day
+            UNION ALL
+            SELECT hub_id, 'delivered', deliv_day, COUNT(DISTINCT tracking_id), 0
+            FROM items WHERE deliv_day BETWEEN %s AND %s GROUP BY hub_id, deliv_day
+            """.format(hub_sql=hub_sql),
+            (loose, loose, loose, *hub_params, start, end, start, end, start, end),
+        ).fetchall()
+        conn.close()
+
+        keys = ("packed", "packedBoxes", "gateout", "delivered")
+        selected = [h for h in hub_rows if not hubs_sel or h["id"] in hubs_sel]
+        by_hub = {h["id"]: dict({"id": h["id"], "name": h["name"], "code": h["code"]}, **{k: 0 for k in keys}) for h in selected}
+        prev = {k: 0 for k in keys}
+        trend = {}
+        d = trend_start
+        while d <= trend_end:
+            trend[d.isoformat()] = {"date": d.isoformat(), "packed": 0, "gateout": 0, "delivered": 0}
+            d += timedelta(days=1)
+        for r in rows:
+            if r["hub_id"] not in by_hub:
+                continue
+            on = r["day"] if not isinstance(r["day"], str) else datetime.strptime(r["day"], "%Y-%m-%d").date()
+            kind, n = r["kind"], int(r["n"])
+            if on == day:
+                by_hub[r["hub_id"]][kind] += n
+                if kind == "packed":
+                    by_hub[r["hub_id"]]["packedBoxes"] += int(r["boxes"])
+            if on == prev_day:
+                prev[kind] += n
+            if on.isoformat() in trend:
+                trend[on.isoformat()][kind] += n
+
+        hubs_out = list(by_hub.values())
+        self.send_json(200, {
+            "date": day.isoformat(), "today": today.isoformat(), "hubIds": hubs_sel,
+            "hubs": hubs_out, "totals": {k: sum(h[k] for h in hubs_out) for k in keys},
+            "previous": prev, "trend": list(trend.values()),
         })
 
     def list_pendency(self):

@@ -234,6 +234,59 @@ body.is-admin .hub-only { display: none !important; }
 .dash-hubs td.num, .dash-hubs th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .dash-hubs td.bad { color: var(--bad); font-weight: 700; }
 .dash-hubs tr.total td { font-weight: 800; border-top: 2px solid var(--line); }
+/* ---- daily report (admin) ---- */
+:root { --gate: #7A5AF8; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gate: #A48BFF; } }
+:root[data-theme="dark"] { --gate: #A48BFF; }
+.dr-filters { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; padding: 14px 16px; margin-bottom: 18px; background: var(--paper-raised); border: 1px solid var(--line); border-radius: 12px; }
+.dr-filters .field > .lbl { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.dr-date-row { display: flex; gap: 6px; align-items: center; }
+.dr-date-row input { font: inherit; font-size: 13.5px; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); height: 36px; }
+.dr-icon-btn { font: inherit; font-size: 15px; width: 36px; height: 36px; border-radius: 7px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer; }
+.dr-icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+.dr-chips { display: flex; gap: 6px; }
+.dr-chip { font: inherit; font-size: 12px; font-weight: 700; padding: 0 13px; height: 36px; border-radius: 999px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer; }
+.dr-chip[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.dr-hub-picker { position: relative; }
+.dr-hub-btn { font: inherit; font-size: 13.5px; min-width: 240px; height: 36px; text-align: left; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer; display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.dr-hub-btn .chev { color: var(--muted); font-size: 10px; }
+.dr-hub-pop { display: none; position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; width: 280px; background: var(--paper-raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px var(--shadow); padding: 8px; }
+.dr-hub-picker.is-open .dr-hub-pop { display: block; }
+.dr-hub-pop input[type=search] { width: 100%; font: inherit; font-size: 13px; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); margin-bottom: 6px; }
+.dr-hub-list { max-height: 280px; overflow-y: auto; }
+.dr-hub-list label { display: flex; gap: 9px; align-items: center; padding: 7px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.dr-hub-list label:hover { background: var(--zebra); }
+.dr-hub-list .code { font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--muted); margin-left: auto; }
+.dr-hub-pop .mp-actions { display: flex; justify-content: space-between; padding: 8px 8px 2px; border-top: 1px solid var(--line); margin-top: 4px; }
+.dr-selected { display: flex; gap: 6px; flex-wrap: wrap; margin: -8px 0 18px; }
+.dr-selected:empty { display: none; }
+.dr-sel-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--paper-raised); border: 1px solid var(--line); border-radius: 999px; padding: 4px 4px 4px 11px; font-size: 12px; font-weight: 600; }
+.dr-sel-chip button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 5px; }
+.dr-sel-chip button:hover { color: var(--bad); }
+#dailyReportView .kpi { cursor: default; position: relative; overflow: hidden; padding-left: 20px; }
+#dailyReportView .kpi:hover { border-color: var(--line); }
+#dailyReportView .kpi::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--kc, var(--line)); }
+.dr-delta-up { color: var(--good); font-weight: 700; } .dr-delta-down { color: var(--bad); font-weight: 700; }
+.dr-legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+.dr-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.dr-b-packed { background: var(--accent); } .dr-b-gate { background: var(--gate); } .dr-b-deliv { background: var(--good); }
+.dr-bar-cell { width: 24%; min-width: 150px; }
+.dr-bars { display: flex; flex-direction: column; gap: 3px; }
+.dr-bars span { display: block; height: 7px; border-radius: 3px; min-width: 1px; }
+.dr-net-pos { color: var(--warn); font-weight: 700; } .dr-net-neg { color: var(--good); font-weight: 700; }
+.dr-trend svg { width: 100%; height: 220px; display: block; }
+.dr-trend .ax { fill: var(--muted); font-size: 10.5px; }
+.dr-trend .grid { stroke: var(--line); }
+.dr-trend rect.sel-day { fill: var(--zebra); }
+.dr-trend rect.hit { cursor: pointer; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; height: 36px; }
+.seg button { font: inherit; font-size: 12.5px; font-weight: 700; padding: 0 14px; border: none; border-right: 1px solid var(--line); background: var(--paper); color: var(--muted); cursor: pointer; }
+.seg button:last-child { border-right: none; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.dash-loc-note { margin: -6px 0 14px !important; }
+.dash-hubs td.na { color: var(--muted); }
+.dr-hub-list .col-group { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 8px 8px 2px; }
+.dr-tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--paper); font-size: 12px; padding: 7px 10px; border-radius: 7px; box-shadow: 0 8px 20px var(--shadow); display: none; z-index: 60; line-height: 1.5; }
 .mini-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
 .mini-grid .card { margin: 0; }
 .mini-grid .row { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
@@ -386,6 +439,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <button type="button" id="tabCourierBookings" aria-selected="false">Courier bookings<span class="nav-badge" id="cbNavBadge" title="Bookings waiting to be shared with DTDC"></span></button>
     <div class="side-nav-label admin-only">Admin</div>
     <button type="button" id="tabDashboard" class="admin-only" aria-selected="false">Dashboard</button>
+    <button type="button" id="tabDailyReport" class="admin-only" aria-selected="false">Daily report</button>
     <button type="button" id="tabRaisedIssues" class="admin-only" aria-selected="false">Raised issues<span class="nav-badge" id="tkNavBadge" title="Tickets not solved yet"></span></button>
     <button type="button" id="tabDailyData" class="admin-only" aria-selected="false">Daily data</button>
     <button type="button" id="tabBrands" class="admin-only" aria-selected="false">Brands</button>
@@ -760,7 +814,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 <div class="app-shell" id="dashboardView" style="display:none; max-width: 1300px;">
   <div class="app-head">
     <div>
-      <p class="eyebrow">Return to Vendor · all hubs</p>
+      <p class="eyebrow" id="dashEyebrow">Return to Vendor · all hubs</p>
       <h1>Dashboard</h1>
     </div>
     <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
@@ -772,6 +826,45 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <button type="button" class="btn small secondary" id="dashRefresh">Refresh</button>
     </div>
   </div>
+  <div class="dr-filters">
+    <div class="field">
+      <span class="lbl">Hubs</span>
+      <div class="dr-hub-picker" id="dashHubPicker">
+        <button type="button" class="dr-hub-btn" id="dashHubBtn" aria-haspopup="true"><span id="dashHubBtnText">All hubs</span><span class="chev">▾</span></button>
+        <div class="dr-hub-pop">
+          <input type="search" id="dashHubSearch" placeholder="Search hubs…" autocomplete="off">
+          <div class="dr-hub-list" id="dashHubList"></div>
+          <div class="mp-actions">
+            <button type="button" class="link-btn" id="dashHubAll">Select all</button>
+            <button type="button" class="link-btn" id="dashHubNone">Clear</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="field">
+      <span class="lbl">Brand location</span>
+      <div class="seg" id="dashLocSeg" role="group" aria-label="Brand location">
+        <button type="button" data-loc="" aria-pressed="true">All</button>
+        <button type="button" data-loc="Local" aria-pressed="false">Local</button>
+        <button type="button" data-loc="Non-Local" aria-pressed="false">Non-Local</button>
+      </div>
+    </div>
+    <div class="field" style="margin-left:auto;">
+      <span class="lbl">Table columns</span>
+      <div class="dr-hub-picker" id="dashColPicker">
+        <button type="button" class="dr-hub-btn" id="dashColBtn" aria-haspopup="true" style="min-width:200px;"><span id="dashColBtnText">All columns</span><span class="chev">▾</span></button>
+        <div class="dr-hub-pop" style="left:auto; right:0;">
+          <div class="dr-hub-list" id="dashColList"></div>
+          <div class="mp-actions">
+            <button type="button" class="link-btn" id="dashColAll">Show all</button>
+            <button type="button" class="link-btn" id="dashColReset">Reset</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="dr-selected" id="dashSelected"></div>
+  <p class="hint dash-loc-note" id="dashLocNote" style="display:none;"></p>
   <div class="kpi-grid" id="dashKpis"></div>
   <div class="card">
     <h2 id="dashTodayTitle">Today</h2>
@@ -779,14 +872,91 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   </div>
   <div class="card">
     <div class="table-toolbar">
-      <h2 style="margin:0;">By hub</h2>
+      <h2 style="margin:0;" id="dashTableTitle">By hub</h2>
       <div class="actions"><button type="button" class="btn small secondary" id="dashCsv">Download CSV</button></div>
     </div>
     <div class="table-wrap">
-      <table class="data-table dash-hubs"><thead><tr><th>Hub</th><th class="num">To scan 1d</th><th class="num">2d</th><th class="num">3+d</th><th class="num">Waiting gate-out</th><th class="num">Waiting delivery</th><th class="num">Waiting 3+ days</th><th class="num">Mismatch (invoices)</th><th class="num">Courier requests</th><th class="num">Open tickets</th><th class="num dash-act">Packed today</th><th class="num dash-act">Dispatched today</th><th class="num dash-act">Delivered today</th></tr></thead><tbody id="dashHubBody"></tbody></table>
+      <table class="data-table dash-hubs"><thead><tr id="dashHubHead"></tr></thead><tbody id="dashHubBody"></tbody></table>
     </div>
   </div>
   <div class="mini-grid" id="dashMini"></div>
+</div>
+
+<div class="app-shell" id="dailyReportView" style="display:none; max-width: 1200px;">
+  <div class="app-head">
+    <div>
+      <p class="eyebrow">Return to Vendor · admin</p>
+      <h1>Daily report</h1>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <button type="button" class="btn small secondary" id="drRefresh">Refresh</button>
+      <button type="button" class="btn small secondary" id="drCsv">Download CSV</button>
+    </div>
+  </div>
+  <div class="dr-filters">
+    <div class="field">
+      <label for="drDate">Date</label>
+      <div class="dr-date-row">
+        <button type="button" class="dr-icon-btn" id="drPrev" title="Previous day" aria-label="Previous day">‹</button>
+        <input type="date" id="drDate">
+        <button type="button" class="dr-icon-btn" id="drNext" title="Next day" aria-label="Next day">›</button>
+      </div>
+    </div>
+    <div class="field">
+      <span class="lbl">Quick pick</span>
+      <div class="dr-chips">
+        <button type="button" class="dr-chip" data-offset="0">Today</button>
+        <button type="button" class="dr-chip" data-offset="1">Yesterday</button>
+      </div>
+    </div>
+    <div class="field">
+      <span class="lbl">Hubs</span>
+      <div class="dr-hub-picker" id="drHubPicker">
+        <button type="button" class="dr-hub-btn" id="drHubBtn" aria-haspopup="true"><span id="drHubBtnText">All hubs</span><span class="chev">▾</span></button>
+        <div class="dr-hub-pop">
+          <input type="search" id="drHubSearch" placeholder="Search hubs…" autocomplete="off">
+          <div class="dr-hub-list" id="drHubList"></div>
+          <div class="mp-actions">
+            <button type="button" class="link-btn" id="drHubAll">Select all</button>
+            <button type="button" class="link-btn" id="drHubNone">Clear</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="dr-selected" id="drSelected"></div>
+  <div class="kpi-grid" id="drKpis"></div>
+  <div class="card">
+    <div class="table-toolbar">
+      <div>
+        <h2 style="margin:0 0 4px;">By hub</h2>
+        <p class="hint" style="margin:0;" id="drTableHint"></p>
+      </div>
+      <div class="dr-legend"><span><i class="dr-b-packed"></i>Packed</span><span><i class="dr-b-gate"></i>Gate-out</span><span><i class="dr-b-deliv"></i>Delivered</span></div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table dash-hubs">
+        <thead><tr>
+          <th>Hub</th><th class="num">Packed shipments</th><th class="num">Packed boxes</th>
+          <th class="num">Gate-out scanned shipments</th><th class="num">Delivered shipments</th>
+          <th class="num" title="Packed minus delivered on this date">Net (P − D)</th><th></th>
+        </tr></thead>
+        <tbody id="drBody"></tbody>
+      </table>
+    </div>
+    <p class="hint" style="margin:12px 0 0;">A shipment is one return tracking ID. Packed = invoice created in the app; gate-out = invoice scanned out of the hub; delivered = the delivery date the store entered. Dates are IST.</p>
+  </div>
+  <div class="card dr-trend">
+    <div class="table-toolbar">
+      <div>
+        <h2 style="margin:0 0 4px;">Last 14 days</h2>
+        <p class="hint" style="margin:0;">Shipments packed, gate-out scanned and delivered per day for the selected hubs. Click a day to open it.</p>
+      </div>
+      <div class="dr-legend"><span><i class="dr-b-packed"></i>Packed</span><span><i class="dr-b-gate"></i>Gate-out</span><span><i class="dr-b-deliv"></i>Delivered</span></div>
+    </div>
+    <div id="drTrend"></div>
+  </div>
+  <div class="dr-tip" id="drTip"></div>
 </div>
 
 <div class="app-shell" id="myTicketsView" style="display:none; max-width: 1240px;">
@@ -3146,8 +3316,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     document.getElementById("tabGateOut").setAttribute("aria-selected", "false");
     document.getElementById("pendencyView").style.display = "none";
     document.getElementById("tabPendency").setAttribute("aria-selected", "false");
-    ["dashboardView", "myTicketsView", "raisedIssuesView"].forEach(function (id) { document.getElementById(id).style.display = "none"; });
-    ["tabDashboard", "tabRaisedIssues"].forEach(function (id) { document.getElementById(id).setAttribute("aria-selected", "false"); });
+    ["dashboardView", "dailyReportView", "myTicketsView", "raisedIssuesView"].forEach(function (id) { document.getElementById(id).style.display = "none"; });
+    ["tabDashboard", "tabDailyReport", "tabRaisedIssues"].forEach(function (id) { document.getElementById(id).setAttribute("aria-selected", "false"); });
     document.getElementById("toMarkDeliveredView").style.display = "none";
     document.getElementById("tabToMarkDelivered").setAttribute("aria-selected", "false");
     document.getElementById("tabPackShipments").setAttribute("aria-selected", "false");
@@ -3754,23 +3924,171 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
 
   function n(v) { return Number(v || 0).toLocaleString("en-IN"); }
 
+  // ---- dashboard filters: hubs, brand location, visible table columns ----
+  var dashHubs = null;   // selected hub ids; null = every hub
+  var dashLoc = "";      // "", "Local" or "Non-Local"
+  var dashSeq = 0;
+  var DASH_COLS = [
+    { key: "pend1", label: "To scan 1d", group: "Pending to scan" },
+    { key: "pend2", label: "To scan 2d" },
+    { key: "pend3", label: "To scan 3+d", warn: true },
+    { key: "waitingGateOut", label: "Waiting gate-out", group: "Packed, not delivered" },
+    { key: "waitingDelivery", label: "Waiting delivery" },
+    { key: "waiting3d", label: "Waiting 3+ days", warn: true },
+    { key: "mismatchInvoices", label: "Mismatch (invoices)", group: "Follow-ups" },
+    { key: "mismatchReturns", label: "Mismatch (returns)", off: true },
+    { key: "requestedBookings", label: "Courier requests", warn: true },
+    { key: "openTickets", label: "Open tickets", warn: true },
+    { key: "packedToday", label: "Packed", act: true, group: "Activity" },
+    { key: "dispatchedToday", label: "Dispatched", act: true },
+    { key: "deliveredToday", label: "Delivered", act: true },
+  ];
+  var DASH_COLS_KEY = "rtv.dashboard.columns";
+  function dashDefaultCols() { return DASH_COLS.filter(function (c) { return !c.off; }).map(function (c) { return c.key; }); }
+  var dashCols = (function () {
+    try {
+      var saved = JSON.parse(localStorage.getItem(DASH_COLS_KEY) || "null");
+      if (Array.isArray(saved)) return saved.filter(function (k) { return DASH_COLS.some(function (c) { return c.key === k; }); });
+    } catch (e) { /* storage blocked: use defaults */ }
+    return dashDefaultCols();
+  })();
+  function dashSaveCols() { try { localStorage.setItem(DASH_COLS_KEY, JSON.stringify(dashCols)); } catch (e) { /* ignore */ } }
+  function dashVisibleCols() { return DASH_COLS.filter(function (c) { return dashCols.indexOf(c.key) !== -1; }); }
+  function dashColLabel(c, period) { return c.act && !period ? c.label + " today" : c.label; }
+
+  function dashAllHubIds() { return state.hubs.map(function (h) { return h.id; }); }
+  function dashSelectedIds() { return dashHubs === null ? dashAllHubIds() : dashHubs; }
+  function dashHubName(id) { var h = state.hubs.find(function (x) { return x.id === id; }); return h ? h.name : "Hub " + id; }
+
+  function dashRenderFilters() {
+    var ids = dashSelectedIds(), total = state.hubs.length, all = dashHubs === null || ids.length === total;
+    document.getElementById("dashHubBtnText").textContent = all ? "All hubs" + (total ? " (" + total + ")" : "")
+      : ids.length === 0 ? "No hubs selected" : ids.length <= 2 ? ids.map(dashHubName).join(", ") : ids.length + " hubs selected";
+    document.getElementById("dashSelected").innerHTML = all ? "" : ids.map(function (id) {
+      return '<span class="dr-sel-chip">' + escapeHtml(dashHubName(id)) + '<button type="button" title="Remove" data-remove="' + id + '">×</button></span>';
+    }).join("");
+    document.querySelectorAll("#dashLocSeg button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-loc") === dashLoc)); });
+    var note = document.getElementById("dashLocNote");
+    note.style.display = dashLoc ? "block" : "none";
+    note.textContent = dashLoc ? "Showing " + dashLoc + " brands only. Pending to scan, tickets and closures can't be split by brand location — a return isn't linked to a brand until it's packed — so they show “—”." : "";
+    document.getElementById("dashEyebrow").textContent = "Return to Vendor · " + (all ? "all hubs" : ids.length + " of " + total + " hubs") + (dashLoc ? " · " + dashLoc : "");
+    var shown = dashVisibleCols().length;
+    document.getElementById("dashColBtnText").textContent = shown === DASH_COLS.length ? "All columns" : shown + " of " + DASH_COLS.length + " columns";
+  }
+  function dashRenderHubList() {
+    var q = document.getElementById("dashHubSearch").value.trim().toLowerCase(), ids = dashSelectedIds();
+    document.getElementById("dashHubList").innerHTML = state.hubs.filter(function (h) {
+      return !q || h.name.toLowerCase().indexOf(q) !== -1 || String(h.code || "").toLowerCase().indexOf(q) !== -1;
+    }).map(function (h) {
+      return '<label><input type="checkbox" value="' + h.id + '"' + (ids.indexOf(h.id) !== -1 ? " checked" : "") + "> " +
+        escapeHtml(h.name) + '<span class="code">' + escapeHtml(h.code || "") + "</span></label>";
+    }).join("") || '<div class="empty-state" style="padding:10px">No hub matches</div>';
+  }
+  function dashRenderColList() {
+    document.getElementById("dashColList").innerHTML = DASH_COLS.map(function (c) {
+      return (c.group ? '<div class="col-group">' + escapeHtml(c.group) + "</div>" : "") +
+        '<label><input type="checkbox" value="' + c.key + '"' + (dashCols.indexOf(c.key) !== -1 ? " checked" : "") + "> " + escapeHtml(c.label) + "</label>";
+    }).join("");
+  }
+  function dashSetHubs(ids) {
+    var all = dashAllHubIds();
+    ids = all.filter(function (id) { return ids.indexOf(id) !== -1; });
+    dashHubs = ids.length === all.length ? null : ids;
+    loadDashboard();
+  }
+  [["dashHubPicker", "dashHubBtn", function () { dashRenderHubList(); document.getElementById("dashHubSearch").focus(); }],
+   ["dashColPicker", "dashColBtn", dashRenderColList]].forEach(function (p) {
+    var picker = document.getElementById(p[0]);
+    document.getElementById(p[1]).addEventListener("click", function (e) {
+      e.stopPropagation();
+      picker.classList.toggle("is-open");
+      if (picker.classList.contains("is-open")) p[2]();
+    });
+    document.addEventListener("click", function (e) { if (!picker.contains(e.target)) picker.classList.remove("is-open"); });
+  });
+  document.getElementById("dashHubSearch").addEventListener("input", dashRenderHubList);
+  document.getElementById("dashHubList").addEventListener("change", function (e) {
+    var id = Number(e.target.value), ids = dashSelectedIds().slice();
+    if (e.target.checked) { if (ids.indexOf(id) === -1) ids.push(id); } else ids = ids.filter(function (x) { return x !== id; });
+    dashSetHubs(ids);
+  });
+  document.getElementById("dashHubAll").addEventListener("click", function () { dashSetHubs(dashAllHubIds()); dashRenderHubList(); });
+  document.getElementById("dashHubNone").addEventListener("click", function () { dashSetHubs([]); dashRenderHubList(); });
+  document.getElementById("dashSelected").addEventListener("click", function (e) {
+    var id = e.target.getAttribute("data-remove");
+    if (id) dashSetHubs(dashSelectedIds().filter(function (x) { return x !== Number(id); }));
+  });
+  document.getElementById("dashLocSeg").addEventListener("click", function (e) {
+    var b = e.target.closest("button");
+    if (!b) return;
+    dashLoc = b.getAttribute("data-loc");
+    loadDashboard();
+  });
+  document.getElementById("dashColList").addEventListener("change", function (e) {
+    var k = e.target.value;
+    if (e.target.checked) { if (dashCols.indexOf(k) === -1) dashCols.push(k); } else dashCols = dashCols.filter(function (x) { return x !== k; });
+    dashSaveCols();
+    dashRenderFilters();
+    if (dashData) dashRenderTable(dashData);
+  });
+  document.getElementById("dashColAll").addEventListener("click", function () {
+    dashCols = DASH_COLS.map(function (c) { return c.key; }); dashSaveCols(); dashRenderColList(); dashRenderFilters(); if (dashData) dashRenderTable(dashData);
+  });
+  document.getElementById("dashColReset").addEventListener("click", function () {
+    dashCols = dashDefaultCols(); dashSaveCols(); dashRenderColList(); dashRenderFilters(); if (dashData) dashRenderTable(dashData);
+  });
+
+  function dashNum(v) { return v == null ? "—" : n(v); }
+  function dashRenderTable(d) {
+    var period = d.months.length ? d.months.map(monthLabel).join(", ") : "";
+    var cols = dashVisibleCols();
+    document.getElementById("dashHubHead").innerHTML = "<th>Hub</th>" + cols.map(function (c) {
+      return "<th class='num'>" + escapeHtml(dashColLabel(c, period)) + "</th>";
+    }).join("");
+    function cells(h) {
+      return "<td>" + escapeHtml(h.name) + "</td>" + cols.map(function (c) {
+        var v = h[c.key];
+        return "<td class='num" + (v == null ? " na" : c.warn && v ? " bad" : "") + "'>" + dashNum(v) + "</td>";
+      }).join("");
+    }
+    var allHubs = !d.hubIds || !d.hubIds.length;
+    document.getElementById("dashHubBody").innerHTML = d.hubs.map(function (h) { return "<tr>" + cells(h) + "</tr>"; }).join("") +
+      (d.hubs.length ? "<tr class='total'>" + cells(Object.assign({}, d.totals, { name: allHubs ? "All hubs" : "Selected hubs" })) + "</tr>" : "");
+    document.getElementById("dashTableTitle").textContent = "By hub" + (d.location ? " · " + d.location + " brands" : "");
+  }
+
   function loadDashboard() {
+    dashRenderFilters();
+    var ids = dashSelectedIds();
+    if (dashHubs !== null && !ids.length) {
+      dashData = null;
+      document.getElementById("dashAsOf").textContent = "";
+      ["dashKpis", "dashToday", "dashMini", "dashHubHead"].forEach(function (id) { document.getElementById(id).innerHTML = ""; });
+      document.getElementById("dashHubBody").innerHTML = "<tr><td class='empty-state'>Pick at least one hub to see the dashboard.</td></tr>";
+      return Promise.resolve();
+    }
+    var qs = [];
+    if (dashMonths.length) qs.push("months=" + encodeURIComponent(dashMonths.join(",")));
+    if (dashHubs !== null) qs.push("hubs=" + encodeURIComponent(ids.join(",")));
+    if (dashLoc) qs.push("location=" + encodeURIComponent(dashLoc));
+    var seq = ++dashSeq;
     document.getElementById("dashAsOf").textContent = "Loading…";
-    return getJson("/api/dashboard" + (dashMonths.length ? "?months=" + encodeURIComponent(dashMonths.join(",")) : "")).then(function (d) {
+    return getJson("/api/dashboard" + (qs.length ? "?" + qs.join("&") : "")).then(function (d) {
+      if (seq !== dashSeq) return;
       dashData = d;
+      dashRenderFilters();
       var t = d.totals;
       var period = d.months.length ? d.months.map(monthLabel).join(", ") : "";
       document.getElementById("dashAsOf").textContent = "Updated " + formatDateTime(d.asOf);
-      document.getElementById("dashTodayTitle").textContent = period ? "In " + period : "Today";
-      var actLabels = period ? ["Packed", "Dispatched", "Delivered"] : ["Packed today", "Dispatched today", "Delivered today"];
-      document.querySelectorAll("#dashboardView th.dash-act").forEach(function (th, i) { th.textContent = actLabels[i]; });
+      document.getElementById("dashTodayTitle").textContent = (period ? "In " + period : "Today") + (d.location ? " · " + d.location + " brands" : "");
+      var split = !d.location;
       var kpis = [
-        { k: "Pending to Scan", v: t.pend1 + t.pend2 + t.pend3, sub: "<b class='bad'>" + n(t.pend3) + "</b> at 3+ days · " + n(t.pend2) + " at 2 days", go: function () { showPendencyView("scan"); }, bad: t.pend3 > 0 },
+        { k: "Pending to Scan", v: split ? t.pend1 + t.pend2 + t.pend3 : null, sub: split ? "<b class='bad'>" + n(t.pend3) + "</b> at 3+ days · " + n(t.pend2) + " at 2 days" : "not split by brand location", go: function () { showPendencyView("scan"); }, bad: split && t.pend3 > 0 },
         { k: "Waiting for gate-out", v: t.waitingGateOut, sub: "packed, not dispatched", go: function () { showPendencyView("dispatch"); } },
         { k: "Waiting for delivery", v: t.waitingDelivery, sub: "<b class='bad'>" + n(t.waiting3d) + "</b> invoices waiting 3+ days", go: function () { showPendencyView("delivery"); } },
         { k: "Delivery mismatch", v: t.mismatchInvoices, sub: n(t.mismatchReturns) + " returns to mark in HMS", go: showToMarkDeliveredView },
         { k: "Courier requests", v: t.requestedBookings, sub: "waiting to be shared with DTDC", go: showCourierBookingsView, bad: t.requestedBookings > 0 },
-        { k: "Open tickets", v: t.openTickets, sub: n(d.tickets["In progress"]) + " in progress", go: showRaisedIssuesView, bad: t.openTickets > 0 },
+        { k: "Open tickets", v: split ? t.openTickets : null, sub: split ? n(d.tickets["In progress"]) + " in progress" : "not split by brand location", go: showRaisedIssuesView, bad: split && t.openTickets > 0 },
       ];
       var grid = document.getElementById("dashKpis");
       grid.innerHTML = "";
@@ -3778,44 +4096,46 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
         var b = document.createElement("button");
         b.type = "button";
         b.className = "kpi";
-        b.innerHTML = "<div class='k'>" + escapeHtml(c.k) + "</div><div class='v" + (c.bad ? " bad" : "") + "'>" + n(c.v) + "</div><div class='sub'>" + c.sub + "</div>";
+        b.innerHTML = "<div class='k'>" + escapeHtml(c.k) + "</div><div class='v" + (c.bad ? " bad" : "") + "'>" + dashNum(c.v) + "</div><div class='sub'>" + c.sub + "</div>";
         b.addEventListener("click", c.go);
         grid.appendChild(b);
       });
       document.getElementById("dashToday").innerHTML =
         "<span><b>" + n(t.packedToday) + "</b>invoices packed</span><span><b>" + n(t.dispatchedToday) + "</b>dispatched</span><span><b>" + n(t.deliveredToday) + "</b>delivered</span>";
 
-      var body = document.getElementById("dashHubBody");
-      function cells(h, total) {
-        var c = function (v, warn) { return "<td class='num" + (warn && v ? " bad" : "") + "'>" + n(v) + "</td>"; };
-        return "<td>" + escapeHtml(h.name) + "</td>" + c(h.pend1) + c(h.pend2) + c(h.pend3, true) + c(h.waitingGateOut) + c(h.waitingDelivery) +
-          c(h.waiting3d, true) + c(h.mismatchInvoices) + c(h.requestedBookings, true) + c(h.openTickets, true) + c(h.packedToday) + c(h.dispatchedToday) + c(h.deliveredToday);
-      }
-      body.innerHTML = d.hubs.map(function (h) { return "<tr>" + cells(h) + "</tr>"; }).join("") +
-        "<tr class='total'>" + cells(Object.assign({ name: "All hubs" }, t)) + "</tr>";
+      dashRenderTable(d);
+      var notSplit = [["Not split by brand location", "—"]];
 
       var li = d.lastImport;
       var stale = !li || istDay(li.createdAt) !== istToday();
       var mini = [
         ["Daily data", li ? [["Last upload", formatDateTime(li.createdAt)], ["By", li.by], ["Rows", n(li.rows)], ["New / updated", n(li.inserted) + " / " + n(li.updated)]] : [["Last upload", "None yet"]],
           stale ? "<p class='field-error' style='margin:6px 0 0;'>No upload today yet.</p>" : ""],
-        [period ? "Closed in " + period : "Closed in the last 7 days", Object.keys(d.closures7d).map(function (k) { return [k, n(d.closures7d[k])]; }), ""],
+        [period ? "Closed in " + period : "Closed in the last 7 days", d.closures7d ? Object.keys(d.closures7d).map(function (k) { return [k, n(d.closures7d[k])]; }) : notSplit, ""],
         ["Courier bookings", Object.keys(d.bookings).map(function (k) { return [k, n(d.bookings[k])]; }), ""],
-        ["Tickets", Object.keys(d.tickets).map(function (k) { return [k, n(d.tickets[k])]; }), ""],
+        ["Tickets", d.tickets ? Object.keys(d.tickets).map(function (k) { return [k, n(d.tickets[k])]; }) : notSplit, ""],
       ];
       document.getElementById("dashMini").innerHTML = mini.map(function (m) {
         return "<div class='card'><h2>" + escapeHtml(m[0]) + "</h2>" + m[1].map(function (r) {
           return "<div class='row'><span>" + escapeHtml(r[0]) + "</span><b>" + escapeHtml(r[1]) + "</b></div>";
         }).join("") + m[2] + "</div>";
       }).join("");
-    }).catch(function (err) { document.getElementById("dashAsOf").textContent = ""; toast("Couldn't load the dashboard: " + err.message, true); });
+    }).catch(function (err) {
+      if (seq !== dashSeq) return;
+      document.getElementById("dashAsOf").textContent = "";
+      toast("Couldn't load the dashboard: " + err.message, true);
+    });
   }
+  // CSV: the columns shown in the table, with the filters in the file name.
   document.getElementById("dashCsv").addEventListener("click", function () {
     if (!dashData) return;
-    var keys = ["pend1", "pend2", "pend3", "waitingGateOut", "waitingDelivery", "waiting3d", "mismatchInvoices", "mismatchReturns", "requestedBookings", "openTickets", "packedToday", "dispatchedToday", "deliveredToday"];
-    downloadCsv("rtv-dashboard-" + istToday() + ".csv",
-      ["Hub", "To scan 1 day", "To scan 2 days", "To scan 3+ days", "Waiting gate-out", "Waiting delivery", "Waiting 3+ days", "Mismatch invoices", "Mismatch returns", "Courier requests", "Open tickets", "Packed today", "Dispatched today", "Delivered today"],
-      dashData.hubs.concat([Object.assign({ name: "All hubs" }, dashData.totals)]).map(function (h) { return [h.name].concat(keys.map(function (k) { return h[k]; })); }));
+    var d = dashData, period = d.months.length ? d.months.map(monthLabel).join(", ") : "", cols = dashVisibleCols();
+    var allHubs = !d.hubIds || !d.hubIds.length;
+    downloadCsv("rtv-dashboard-" + istToday() + (d.location ? "-" + d.location.toLowerCase() : "") + (allHubs ? "" : "-" + d.hubs.length + "-hubs") + ".csv",
+      ["Hub"].concat(cols.map(function (c) { return dashColLabel(c, period); })),
+      d.hubs.concat([Object.assign({}, d.totals, { name: allHubs ? "All hubs" : "Selected hubs" })]).map(function (h) {
+        return [h.name].concat(cols.map(function (c) { return h[c.key] == null ? "" : h[c.key]; }));
+      }));
   });
 
   // ================= pendency =================
@@ -4363,6 +4683,204 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   document.getElementById("brandsCsvBtn").addEventListener("click", function () {
     downloadCsv("rtv-brands-return-location.csv", ["Brand / store", "Short name", "Company", "Pincode", "Return location"],
       filteredBrands().map(function (v) { return [v.name, v.shortName, v.warehouseLabel, v.pincode, v.returnLocation || "Not set"]; }));
+  });
+
+  // ================= daily report (admin) =================
+  var drDate = null;     // "YYYY-MM-DD" (IST); set on first open
+  var drHubs = null;     // selected hub ids; null = all hubs
+  var drData = null;
+  var drSeq = 0;
+
+  function drAddDays(d, k) { var t = new Date(d + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() + k); return t.toISOString().slice(0, 10); }
+  function drFmtDate(d, short) {
+    return new Date(d + "T00:00:00").toLocaleDateString("en-IN", short ? { day: "numeric", month: "short" } : { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  }
+  function drAllHubIds() { return state.hubs.map(function (h) { return h.id; }); }
+  function drSelectedIds() { return drHubs === null ? drAllHubIds() : drHubs; }
+  function drHubName(id) { var h = state.hubs.find(function (x) { return x.id === id; }); return h ? h.name : "Hub " + id; }
+
+  function showDailyReportView() {
+    currentTabShow = showDailyReportView;
+    hideAllTabViews();
+    document.getElementById("dailyReportView").style.display = "block";
+    document.getElementById("tabDailyReport").setAttribute("aria-selected", "true");
+    if (!drDate) drDate = istToday();
+    loadDailyReport();
+  }
+  document.getElementById("tabDailyReport").addEventListener("click", showDailyReportView);
+  document.getElementById("drRefresh").addEventListener("click", function () { loadDailyReport(); });
+
+  function drRenderControls() {
+    var today = istToday();
+    var input = document.getElementById("drDate");
+    input.max = today;
+    input.value = drDate;
+    document.getElementById("drNext").disabled = drDate >= today;
+    document.querySelectorAll("#dailyReportView .dr-chip").forEach(function (b) {
+      b.setAttribute("aria-pressed", String(drAddDays(today, -Number(b.getAttribute("data-offset"))) === drDate));
+    });
+    var ids = drSelectedIds(), total = state.hubs.length;
+    document.getElementById("drHubBtnText").textContent = drHubs === null || ids.length === total ? "All hubs (" + total + ")"
+      : ids.length === 0 ? "No hubs selected"
+      : ids.length <= 3 ? ids.map(drHubName).join(", ") : ids.length + " hubs selected";
+    document.getElementById("drSelected").innerHTML = drHubs === null || ids.length === total ? "" : ids.map(function (id) {
+      return '<span class="dr-sel-chip">' + escapeHtml(drHubName(id)) + '<button type="button" title="Remove" data-remove="' + id + '">×</button></span>';
+    }).join("");
+  }
+  function drRenderHubList() {
+    var q = document.getElementById("drHubSearch").value.trim().toLowerCase();
+    var ids = drSelectedIds();
+    var list = state.hubs.filter(function (h) {
+      return !q || h.name.toLowerCase().indexOf(q) !== -1 || String(h.code || "").toLowerCase().indexOf(q) !== -1;
+    });
+    document.getElementById("drHubList").innerHTML = list.map(function (h) {
+      return '<label><input type="checkbox" value="' + h.id + '"' + (ids.indexOf(h.id) !== -1 ? " checked" : "") + "> " +
+        escapeHtml(h.name) + '<span class="code">' + escapeHtml(h.code || "") + "</span></label>";
+    }).join("") || '<div class="empty-state" style="padding:10px">No hub matches</div>';
+  }
+  function drSetHubs(ids) {
+    var all = drAllHubIds();
+    ids = all.filter(function (id) { return ids.indexOf(id) !== -1; });
+    drHubs = ids.length === all.length ? null : ids;
+    loadDailyReport();
+  }
+  var drPicker = document.getElementById("drHubPicker");
+  document.getElementById("drHubBtn").addEventListener("click", function (e) {
+    e.stopPropagation();
+    drPicker.classList.toggle("is-open");
+    if (drPicker.classList.contains("is-open")) { drRenderHubList(); document.getElementById("drHubSearch").focus(); }
+  });
+  document.addEventListener("click", function (e) { if (!drPicker.contains(e.target)) drPicker.classList.remove("is-open"); });
+  document.getElementById("drHubSearch").addEventListener("input", drRenderHubList);
+  document.getElementById("drHubList").addEventListener("change", function (e) {
+    var id = Number(e.target.value), ids = drSelectedIds().slice();
+    if (e.target.checked) { if (ids.indexOf(id) === -1) ids.push(id); } else ids = ids.filter(function (x) { return x !== id; });
+    drSetHubs(ids);
+  });
+  document.getElementById("drHubAll").addEventListener("click", function () { drSetHubs(drAllHubIds()); drRenderHubList(); });
+  document.getElementById("drHubNone").addEventListener("click", function () { drSetHubs([]); drRenderHubList(); });
+  document.getElementById("drSelected").addEventListener("click", function (e) {
+    var id = e.target.getAttribute("data-remove");
+    if (id) drSetHubs(drSelectedIds().filter(function (x) { return x !== Number(id); }));
+  });
+  document.getElementById("drDate").addEventListener("change", function () {
+    var v = this.value;
+    if (!v) return;
+    drDate = v > istToday() ? istToday() : v;
+    loadDailyReport();
+  });
+  document.getElementById("drPrev").addEventListener("click", function () { drDate = drAddDays(drDate, -1); loadDailyReport(); });
+  document.getElementById("drNext").addEventListener("click", function () { if (drDate < istToday()) { drDate = drAddDays(drDate, 1); loadDailyReport(); } });
+  document.querySelectorAll("#dailyReportView .dr-chip").forEach(function (b) {
+    b.addEventListener("click", function () { drDate = drAddDays(istToday(), -Number(b.getAttribute("data-offset"))); loadDailyReport(); });
+  });
+
+  function loadDailyReport() {
+    drRenderControls();
+    var ids = drSelectedIds();
+    // "All hubs" (null) needs no list: the server returns every hub, even if
+    // state.hubs hasn't finished loading yet.
+    if (drHubs !== null && !ids.length) { drData = null; drRender(); return Promise.resolve(); }
+    var seq = ++drSeq;
+    document.getElementById("drTableHint").textContent = "Loading…";
+    var url = "/api/daily-report?date=" + encodeURIComponent(drDate) + (drHubs === null ? "" : "&hubs=" + encodeURIComponent(ids.join(",")));
+    return getJson(url).then(function (d) {
+      if (seq !== drSeq) return;
+      drData = d;
+      drRenderControls();
+      drRender();
+    }).catch(function (err) {
+      if (seq !== drSeq) return;
+      document.getElementById("drTableHint").textContent = "";
+      toast("Couldn't load the daily report: " + err.message, true);
+    });
+  }
+
+  function drRender() {
+    var kpis = document.getElementById("drKpis"), body = document.getElementById("drBody"), trend = document.getElementById("drTrend");
+    if (!drData) {
+      kpis.innerHTML = "";
+      trend.innerHTML = "";
+      document.getElementById("drTableHint").textContent = drFmtDate(drDate);
+      body.innerHTML = '<tr><td colspan="7" class="empty-state">Pick at least one hub to see the report.</td></tr>';
+      return;
+    }
+    var d = drData, t = d.totals, p = d.previous, isToday = d.date === d.today;
+    function delta(cur, old) {
+      if (!old) return "";
+      var pct = Math.round((cur - old) / old * 100);
+      return '<div class="sub" style="margin-top:4px"><span class="' + (pct >= 0 ? "dr-delta-up" : "dr-delta-down") + '">' + (pct >= 0 ? "▲ " : "▼ ") + Math.abs(pct) + "%</span> vs previous day</div>";
+    }
+    function kpi(label, v, sub, extra, color, signed) {
+      return '<div class="kpi" style="--kc:' + color + '"><div class="k">' + label + '</div><div class="v">' + (signed && v > 0 ? "+" : "") + n(v) + '</div><div class="sub">' + sub + "</div>" + extra + "</div>";
+    }
+    var net = t.packed - t.delivered;
+    kpis.innerHTML =
+      kpi("Shipments packed", t.packed, n(t.packedBoxes) + " boxes", delta(t.packed, p.packed), "var(--accent)") +
+      kpi("Gate-out scanned", t.gateout, "Shipments scanned out of the hub", delta(t.gateout, p.gateout), "var(--gate)") +
+      kpi("Shipments delivered", t.delivered, "Marked delivered by the store", delta(t.delivered, p.delivered), "var(--good)") +
+      kpi("Net (packed − delivered)", net, net > 0 ? "More packed than delivered" : net < 0 ? "More delivered than packed" : "Even", "", net > 0 ? "var(--warn)" : "var(--good)", true);
+
+    var allSel = drHubs === null;
+    document.getElementById("drTableHint").textContent = drFmtDate(d.date) + (isToday ? " · so far today" : "") + " · " +
+      (allSel ? "all hubs" : d.hubs.length + " of " + state.hubs.length + " hubs");
+    var max = Math.max.apply(null, d.hubs.map(function (h) { return Math.max(h.packed, h.gateout, h.delivered); }).concat([1]));
+    function netCell(v) { return '<td class="num ' + (v > 0 ? "dr-net-pos" : v < 0 ? "dr-net-neg" : "") + '">' + (v > 0 ? "+" : "") + n(v) + "</td>"; }
+    body.innerHTML = d.hubs.map(function (h) {
+      return "<tr><td><b>" + escapeHtml(h.name) + '</b> <span class="mono" style="color:var(--muted);font-size:11px">' + escapeHtml(h.code || "") + "</span></td>" +
+        '<td class="num"><b>' + n(h.packed) + '</b></td><td class="num">' + n(h.packedBoxes) + "</td>" +
+        '<td class="num"><b>' + n(h.gateout) + '</b></td><td class="num"><b>' + n(h.delivered) + "</b></td>" + netCell(h.packed - h.delivered) +
+        '<td class="dr-bar-cell"><div class="dr-bars"><span class="dr-b-packed" style="width:' + (h.packed / max * 100) + '%"></span><span class="dr-b-gate" style="width:' +
+        (h.gateout / max * 100) + '%"></span><span class="dr-b-deliv" style="width:' + (h.delivered / max * 100) + '%"></span></div></td></tr>';
+    }).join("") + (d.hubs.length > 1 ? '<tr class="total"><td>Total</td><td class="num">' + n(t.packed) + '</td><td class="num">' + n(t.packedBoxes) +
+      '</td><td class="num">' + n(t.gateout) + '</td><td class="num">' + n(t.delivered) + "</td>" + netCell(net) + "<td></td></tr>" : "");
+
+    drRenderTrend(d.trend, d.date);
+  }
+
+  function drRenderTrend(data, selDate) {
+    var W = 900, H = 220, L = 40, B = 26, T = 10, plotW = W - L - 6, plotH = H - B - T;
+    var max = Math.max.apply(null, data.map(function (x) { return Math.max(x.packed, x.gateout, x.delivered); }).concat([4]));
+    var step = Math.pow(10, Math.floor(Math.log10(max)));
+    if (max / step < 2) step /= 5; else if (max / step < 5) step /= 2;
+    step = Math.max(1, step);
+    var top = Math.ceil(max / step) * step;
+    var slot = plotW / data.length, bw = Math.min(13, slot * 0.24);
+    function y(v) { return T + plotH - v / top * plotH; }
+    var svg = '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" role="img" aria-label="Packed, gate-out and delivered shipments, last 14 days">';
+    for (var g = 0; g <= top; g += step) {
+      svg += '<line class="grid" x1="' + L + '" x2="' + W + '" y1="' + y(g) + '" y2="' + y(g) + '"/><text class="ax" x="' + (L - 6) + '" y="' + (y(g) + 3.5) + '" text-anchor="end">' + n(g) + "</text>";
+    }
+    data.forEach(function (x, i) {
+      var cx = L + slot * i + slot / 2;
+      if (x.date === selDate) svg += '<rect class="sel-day" x="' + (L + slot * i + 2) + '" y="' + T + '" width="' + (slot - 4) + '" height="' + plotH + '" rx="6"/>';
+      [[x.packed, "var(--accent)", cx - bw * 1.5 - 2], [x.gateout, "var(--gate)", cx - bw / 2], [x.delivered, "var(--good)", cx + bw / 2 + 2]].forEach(function (b) {
+        svg += '<rect x="' + b[2] + '" y="' + y(b[0]) + '" width="' + bw + '" height="' + (T + plotH - y(b[0])) + '" rx="3" fill="' + b[1] + '"/>';
+      });
+      svg += '<rect class="hit" data-i="' + i + '" x="' + (L + slot * i) + '" y="' + T + '" width="' + slot + '" height="' + plotH + '" fill="transparent"/>';
+      svg += '<text class="ax" x="' + cx + '" y="' + (H - 8) + '" text-anchor="middle"' + (x.date === selDate ? ' style="fill:var(--ink);font-weight:700"' : "") + ">" + escapeHtml(drFmtDate(x.date, true)) + "</text>";
+    });
+    var box = document.getElementById("drTrend");
+    box.innerHTML = svg + "</svg>";
+    var tip = document.getElementById("drTip");
+    box.querySelectorAll("rect.hit").forEach(function (r) {
+      var x = data[Number(r.getAttribute("data-i"))];
+      r.addEventListener("mousemove", function (e) {
+        tip.style.display = "block";
+        tip.style.left = (e.clientX + 14) + "px";
+        tip.style.top = (e.clientY + 14) + "px";
+        tip.innerHTML = "<b>" + escapeHtml(drFmtDate(x.date)) + "</b><br>Packed: " + n(x.packed) + "<br>Gate-out: " + n(x.gateout) + "<br>Delivered: " + n(x.delivered);
+      });
+      r.addEventListener("mouseleave", function () { tip.style.display = "none"; });
+      r.addEventListener("click", function () { tip.style.display = "none"; drDate = x.date; loadDailyReport(); });
+    });
+  }
+
+  document.getElementById("drCsv").addEventListener("click", function () {
+    if (!drData) return toast("Nothing to download — pick at least one hub.", true);
+    downloadCsv("rtv-daily-report-" + drData.date + ".csv",
+      ["Date", "Hub", "Hub code", "Packed shipments", "Packed boxes", "Gate-out scanned shipments", "Delivered shipments", "Net (packed - delivered)"],
+      drData.hubs.map(function (h) { return [drData.date, h.name, h.code, h.packed, h.packedBoxes, h.gateout, h.delivered, h.packed - h.delivered]; }));
   });
 
   // ================= hub accounts (admin) =================
