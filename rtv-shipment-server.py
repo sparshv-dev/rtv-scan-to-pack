@@ -2250,7 +2250,7 @@ class Handler(BaseHTTPRequestHandler):
         d = dw_end
         while d >= dw_start:
             if not sel or d.strftime("%Y-%m") in sel:
-                by_day[d] = {"date": d.isoformat(), "packed": 0, "gateout": 0, "delivered": 0}
+                by_day[d] = {"date": d.isoformat(), "generated": None if location else 0, "packed": 0, "gateout": 0, "delivered": 0}
             d -= timedelta(days=1)
         if by_day:
             x_sql, x_params = filters("s.hub_id", "s.vendor_id")
@@ -2280,6 +2280,19 @@ class Handler(BaseHTTPRequestHandler):
                 on = r["day"] if not isinstance(r["day"], str) else datetime.strptime(r["day"], "%Y-%m-%d").date()
                 if on in by_day:
                     by_day[on][r["kind"]] += int(r["n"])
+            # Returns generated: distinct return tracking IDs by Return Created
+            # At (daily dump). Returns have no brand yet, so not split by location.
+            if not location:
+                h_sql, h_params = hub_f("hub_id")
+                for r in conn.execute(
+                    "SELECT (return_created_at AT TIME ZONE 'Asia/Kolkata')::date AS day, COUNT(DISTINCT return_tracking_id) AS n "
+                    "FROM returns WHERE return_created_at >= %s AND return_created_at < %s" + h_sql + " GROUP BY 1",
+                    ((datetime.combine(dw_start, datetime.min.time(), IST)).isoformat(),
+                     (datetime.combine(dw_end + timedelta(days=1), datetime.min.time(), IST)).isoformat(), *h_params),
+                ).fetchall():
+                    on = r["day"] if not isinstance(r["day"], str) else datetime.strptime(r["day"], "%Y-%m-%d").date()
+                    if on in by_day:
+                        by_day[on]["generated"] = int(r["n"])
         date_wise = list(by_day.values())
 
         last = conn.execute("SELECT * FROM dump_imports ORDER BY id DESC LIMIT 1").fetchone()
