@@ -2114,7 +2114,8 @@ class Handler(BaseHTTPRequestHandler):
             l_sql, l_params = loc_f(vendor_col) if vendor_col else ("", [])
             return h_sql + l_sql, h_params + l_params
 
-        not_split = ["pend1", "pend2", "pend3", "openTickets"] if location else []
+        # Tickets aren't tied to a return or a brand, so they can't be split.
+        not_split = ["openTickets"] if location else []
 
         def in_months(expr, kind="ts"):
             """SQL fragment + params limiting expr to the selected months."""
@@ -2143,14 +2144,38 @@ class Handler(BaseHTTPRequestHandler):
         for r in conn.execute("SELECT id, name FROM hubs WHERE TRUE" + h_sql + " ORDER BY name", tuple(h_params)).fetchall():
             hub(r["id"], r["name"])
 
-        if not location:
-            f_sql, f_params = in_months("r.clock_start")
-            x_sql, x_params = filters("r.hub_id")
-            for r in conn.execute(self.PENDENCY_SQL + " WHERE TRUE" + f_sql + x_sql, tuple(f_params + x_params)).fetchall():
-                if r["clock_start"] is None:
-                    continue
-                hours = float(r["age_hours"])
-                hub(r["hub_id"])["pend1" if hours < 24 else "pend2" if hours < 48 else "pend3"] += 1
+        # A return has no brand until it's packed. For the location filter,
+        # give each return its seller's usual brand location: the location
+        # most of that seller's packed returns went to. Sellers never packed
+        # yet have no location and drop out of both Local and Non-Local.
+        def seller_f(col):
+            return (f" AND {col} = ANY(%s::text[])", [loc_sellers]) if location else ("", [])
+
+        loc_sellers = []
+        if location:
+            loc_sellers = [r["seller_name"] for r in conn.execute(
+                """
+                SELECT seller_name FROM (
+                    SELECT r.seller_name, v.return_location,
+                           ROW_NUMBER() OVER (PARTITION BY r.seller_name
+                                              ORDER BY COUNT(DISTINCT r.return_tracking_id) DESC, v.return_location) AS rn
+                    FROM returns r
+                    JOIN shipment_items si ON si.tracking_id = r.return_tracking_id AND (si.sku IS NULL OR si.sku = r.sku)
+                    JOIN shipments s ON s.id = si.shipment_id
+                    JOIN vendors v ON v.id = s.vendor_id
+                    WHERE v.return_location IN ('Local', 'Non-Local') AND r.seller_name IS NOT NULL
+                    GROUP BY r.seller_name, v.return_location
+                ) x WHERE rn = 1 AND return_location = %s
+                """, (location,)).fetchall()]
+
+        f_sql, f_params = in_months("r.clock_start")
+        x_sql, x_params = filters("r.hub_id")
+        s_sql, s_params = seller_f("r.seller_name")
+        for r in conn.execute(self.PENDENCY_SQL + " WHERE TRUE" + f_sql + x_sql + s_sql, tuple(f_params + x_params + s_params)).fetchall():
+            if r["clock_start"] is None:
+                continue
+            hours = float(r["age_hours"])
+            hub(r["hub_id"])["pend1" if hours < 24 else "pend2" if hours < 48 else "pend3"] += 1
 
         x_sql, x_params = filters("hub_id", "vendor_id")
         for r in conn.execute(
@@ -2228,14 +2253,17 @@ class Handler(BaseHTTPRequestHandler):
             h["packedToday"], h["dispatchedToday"], h["deliveredToday"] = r["packed"], r["dispatched"], r["delivered"]
 
         closures = {rs: 0 for rs in CLOSURE_REASONS}
-        x_sql, x_params = filters("hub_id")
+        x_sql, x_params = filters("c.hub_id")
+        if location:
+            x_sql += (" AND EXISTS (SELECT 1 FROM returns r WHERE r.return_tracking_id = c.return_tracking_id"
+                      " AND r.sku = c.sku AND r.seller_name = ANY(%s::text[]))")
+            x_params = x_params + [loc_sellers]
         if sel:
-            c_sql, c_params = "SELECT reason, COUNT(*) AS n FROM return_closures WHERE TRUE" + in_months("closed_at")[0] + x_sql + " GROUP BY reason", tuple(in_months("closed_at")[1] + x_params)
+            c_sql, c_params = "SELECT reason, COUNT(*) AS n FROM return_closures c WHERE TRUE" + in_months("c.closed_at")[0] + x_sql + " GROUP BY reason", tuple(in_months("c.closed_at")[1] + x_params)
         else:
-            c_sql, c_params = "SELECT reason, COUNT(*) AS n FROM return_closures WHERE closed_at >= %s" + x_sql + " GROUP BY reason", (week_ago, *x_params)
-        if not location:
-            for r in conn.execute(c_sql, c_params).fetchall():
-                closures[r["reason"]] = r["n"]
+            c_sql, c_params = "SELECT reason, COUNT(*) AS n FROM return_closures c WHERE c.closed_at >= %s" + x_sql + " GROUP BY reason", (week_ago, *x_params)
+        for r in conn.execute(c_sql, c_params).fetchall():
+            closures[r["reason"]] = r["n"]
 
         # Date wise: shipments (distinct return tracking IDs) packed, gate-out
         # scanned and delivered per IST day — same rules as the Daily report.
@@ -2252,7 +2280,7 @@ class Handler(BaseHTTPRequestHandler):
         d = dw_end
         while d >= dw_start:
             if not sel or d.strftime("%Y-%m") in sel:
-                by_day[d] = {"date": d.isoformat(), "generated": None if location else 0, "packed": 0, "gateout": 0, "delivered": 0}
+                by_day[d] = {"date": d.isoformat(), "generated": 0, "packed": 0, "gateout": 0, "delivered": 0}
             d -= timedelta(days=1)
         if by_day:
             x_sql, x_params = filters("s.hub_id", "s.vendor_id")
@@ -2285,21 +2313,21 @@ class Handler(BaseHTTPRequestHandler):
             # Returns generated: distinct return tracking IDs by the Pending to
             # Scan clock start (RTO / Home Trial → Return Created At, else
             # Picked Up At), over every return — packed or closed ones too.
-            # Returns have no brand yet, so not split by location.
-            if not location:
-                h_sql, h_params = hub_f("hub_id")
-                for r in conn.execute(
-                    "SELECT (clock_start AT TIME ZONE 'Asia/Kolkata')::date AS day, COUNT(DISTINCT return_tracking_id) AS n "
-                    "FROM (SELECT return_tracking_id, hub_id, "
-                    "CASE WHEN return_type ILIKE 'rto%%' OR return_type ILIKE '%%home trial%%' "
-                    "THEN return_created_at ELSE picked_up_at END AS clock_start FROM returns) r "
-                    "WHERE clock_start >= %s AND clock_start < %s" + h_sql + " GROUP BY 1",
-                    ((datetime.combine(dw_start, datetime.min.time(), IST)).isoformat(),
-                     (datetime.combine(dw_end + timedelta(days=1), datetime.min.time(), IST)).isoformat(), *h_params),
-                ).fetchall():
-                    on = r["day"] if not isinstance(r["day"], str) else datetime.strptime(r["day"], "%Y-%m-%d").date()
-                    if on in by_day:
-                        by_day[on]["generated"] = int(r["n"])
+            # Location filter: by the seller's usual brand location (seller_f).
+            h_sql, h_params = hub_f("hub_id")
+            s_sql, s_params = seller_f("seller_name")
+            for r in conn.execute(
+                "SELECT (clock_start AT TIME ZONE 'Asia/Kolkata')::date AS day, COUNT(DISTINCT return_tracking_id) AS n "
+                "FROM (SELECT return_tracking_id, hub_id, seller_name, "
+                "CASE WHEN return_type ILIKE 'rto%%' OR return_type ILIKE '%%home trial%%' "
+                "THEN return_created_at ELSE picked_up_at END AS clock_start FROM returns) r "
+                "WHERE clock_start >= %s AND clock_start < %s" + h_sql + s_sql + " GROUP BY 1",
+                ((datetime.combine(dw_start, datetime.min.time(), IST)).isoformat(),
+                 (datetime.combine(dw_end + timedelta(days=1), datetime.min.time(), IST)).isoformat(), *h_params, *s_params),
+            ).fetchall():
+                on = r["day"] if not isinstance(r["day"], str) else datetime.strptime(r["day"], "%Y-%m-%d").date()
+                if on in by_day:
+                    by_day[on]["generated"] = int(r["n"])
         date_wise = list(by_day.values())
 
         last = conn.execute("SELECT * FROM dump_imports ORDER BY id DESC LIMIT 1").fetchone()
@@ -2315,7 +2343,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(200, {
             "asOf": now.isoformat(), "trackingFrom": since, "hubs": rows, "totals": totals, "months": sel,
             "hubIds": hubs_sel, "location": location, "notSplit": not_split, "dateWise": date_wise,
-            "bookings": bookings, "tickets": None if location else tickets, "closures7d": None if location else closures,
+            "bookings": bookings, "tickets": None if location else tickets, "closures7d": closures,
             "lastImport": {
                 "createdAt": last["created_at"], "by": last["uploaded_by"], "filename": last["filename"],
                 "rows": last["total_rows"] - last["blank_rows"], "inserted": last["inserted"], "updated": last["updated"],
