@@ -2235,6 +2235,53 @@ class Handler(BaseHTTPRequestHandler):
             for r in conn.execute(c_sql, c_params).fetchall():
                 closures[r["reason"]] = r["n"]
 
+        # Date wise: shipments (distinct return tracking IDs) packed, gate-out
+        # scanned and delivered per IST day — same rules as the Daily report.
+        # Selected months → every day of them up to today; else the last 30 days.
+        today_d = today_ist.date()
+        if sel:
+            first = datetime.strptime(sel[0] + "-01", "%Y-%m-%d").date()
+            y, mo = map(int, sel[-1].split("-"))
+            last_d = (datetime(y + mo // 12, mo % 12 + 1, 1).date() - timedelta(days=1))
+            dw_start, dw_end = first, min(last_d, today_d)
+        else:
+            dw_start, dw_end = today_d - timedelta(days=29), today_d
+        by_day = {}
+        d = dw_end
+        while d >= dw_start:
+            if not sel or d.strftime("%Y-%m") in sel:
+                by_day[d] = {"date": d.isoformat(), "packed": 0, "gateout": 0, "delivered": 0}
+            d -= timedelta(days=1)
+        if by_day:
+            x_sql, x_params = filters("s.hub_id", "s.vendor_id")
+            loose = (dw_start - timedelta(days=1)).isoformat()
+            for r in conn.execute(
+                """
+                WITH items AS (
+                    SELECT si.tracking_id,
+                           (s.created_at::timestamptz AT TIME ZONE 'Asia/Kolkata')::date AS packed_day,
+                           (s.dispatched_at::timestamptz AT TIME ZONE 'Asia/Kolkata')::date AS gate_day,
+                           CASE WHEN s.delivered_at IS NOT NULL THEN NULLIF(s.delivered_on, '')::date END AS deliv_day
+                    FROM shipments s
+                    JOIN shipment_items si ON si.shipment_id = s.id
+                    WHERE (s.created_at >= %s OR s.dispatched_at >= %s OR s.delivered_on >= %s) {x_sql}
+                )
+                SELECT 'packed' AS kind, packed_day AS day, COUNT(DISTINCT tracking_id) AS n
+                FROM items WHERE packed_day BETWEEN %s AND %s GROUP BY packed_day
+                UNION ALL
+                SELECT 'gateout', gate_day, COUNT(DISTINCT tracking_id)
+                FROM items WHERE gate_day BETWEEN %s AND %s GROUP BY gate_day
+                UNION ALL
+                SELECT 'delivered', deliv_day, COUNT(DISTINCT tracking_id)
+                FROM items WHERE deliv_day BETWEEN %s AND %s GROUP BY deliv_day
+                """.format(x_sql=x_sql),
+                (loose, loose, loose, *x_params, dw_start, dw_end, dw_start, dw_end, dw_start, dw_end),
+            ).fetchall():
+                on = r["day"] if not isinstance(r["day"], str) else datetime.strptime(r["day"], "%Y-%m-%d").date()
+                if on in by_day:
+                    by_day[on][r["kind"]] += int(r["n"])
+        date_wise = list(by_day.values())
+
         last = conn.execute("SELECT * FROM dump_imports ORDER BY id DESC LIMIT 1").fetchone()
         conn.close()
 
@@ -2247,7 +2294,7 @@ class Handler(BaseHTTPRequestHandler):
                 h[k] = None
         self.send_json(200, {
             "asOf": now.isoformat(), "trackingFrom": since, "hubs": rows, "totals": totals, "months": sel,
-            "hubIds": hubs_sel, "location": location, "notSplit": not_split,
+            "hubIds": hubs_sel, "location": location, "notSplit": not_split, "dateWise": date_wise,
             "bookings": bookings, "tickets": None if location else tickets, "closures7d": None if location else closures,
             "lastImport": {
                 "createdAt": last["created_at"], "by": last["uploaded_by"], "filename": last["filename"],

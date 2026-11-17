@@ -873,10 +873,23 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   <div class="card">
     <div class="table-toolbar">
       <h2 style="margin:0;" id="dashTableTitle">By hub</h2>
-      <div class="actions"><button type="button" class="btn small secondary" id="dashCsv">Download CSV</button></div>
+      <div class="actions" style="display:flex; gap:10px; align-items:center;">
+        <div class="seg" id="dashViewSeg" role="group" aria-label="Table view">
+          <button type="button" data-view="hub" aria-pressed="true">By hub</button>
+          <button type="button" data-view="date" aria-pressed="false">Date wise</button>
+        </div>
+        <button type="button" class="btn small secondary" id="dashCsv">Download CSV</button>
+      </div>
     </div>
-    <div class="table-wrap">
+    <p class="hint" id="dashDateNote" style="display:none; margin:0 0 8px;"></p>
+    <div class="table-wrap" id="dashHubWrap">
       <table class="data-table dash-hubs"><thead><tr id="dashHubHead"></tr></thead><tbody id="dashHubBody"></tbody></table>
+    </div>
+    <div class="table-wrap" id="dashDateWrap" style="display:none;">
+      <table class="data-table dash-hubs">
+        <thead><tr><th>Date</th><th class="num">Packed</th><th class="num">Gate-out</th><th class="num">Delivered</th></tr></thead>
+        <tbody id="dashDateBody"></tbody>
+      </table>
     </div>
   </div>
   <div class="mini-grid" id="dashMini"></div>
@@ -4054,8 +4067,39 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     var allHubs = !d.hubIds || !d.hubIds.length;
     document.getElementById("dashHubBody").innerHTML = d.hubs.map(function (h) { return "<tr>" + cells(h) + "</tr>"; }).join("") +
       (d.hubs.length ? "<tr class='total'>" + cells(Object.assign({}, d.totals, { name: allHubs ? "All hubs" : "Selected hubs" })) + "</tr>" : "");
-    document.getElementById("dashTableTitle").textContent = "By hub" + (d.location ? " · " + d.location + " brands" : "");
+    document.getElementById("dashTableTitle").textContent = (dashView === "date" ? "Date wise" : "By hub") + (d.location ? " · " + d.location + " brands" : "");
+    dashRenderDateWise(d);
   }
+
+  // ---- date-wise view: packed / gate-out / delivered shipments per IST day ----
+  var dashView = "hub";
+  function dashFmtDay(iso) {
+    return new Date(iso + "T00:00:00Z").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  }
+  function dashRenderDateWise(d) {
+    var isDate = dashView === "date";
+    document.querySelectorAll("#dashViewSeg button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-view") === dashView)); });
+    document.getElementById("dashHubWrap").style.display = isDate ? "none" : "";
+    document.getElementById("dashDateWrap").style.display = isDate ? "" : "none";
+    document.getElementById("dashColPicker").closest(".field").style.visibility = isDate ? "hidden" : "";
+    var note = document.getElementById("dashDateNote");
+    note.style.display = isDate ? "block" : "none";
+    if (!d) return;
+    var rows = d.dateWise || [];
+    note.textContent = "Shipments = distinct return tracking IDs. Packed by invoice date, gate-out by scan date, delivered by the delivery date the store entered. " +
+      (d.months.length ? "Every day of " + d.months.map(monthLabel).join(", ") + "." : "Last 30 days — pick months above for older dates.");
+    var tot = rows.reduce(function (a, r) { a.packed += r.packed; a.gateout += r.gateout; a.delivered += r.delivered; return a; }, { packed: 0, gateout: 0, delivered: 0 });
+    document.getElementById("dashDateBody").innerHTML = rows.length ? rows.map(function (r) {
+      return "<tr><td>" + escapeHtml(dashFmtDay(r.date)) + "</td><td class='num'>" + n(r.packed) + "</td><td class='num'>" + n(r.gateout) + "</td><td class='num'>" + n(r.delivered) + "</td></tr>";
+    }).join("") + "<tr class='total'><td>Total</td><td class='num'>" + n(tot.packed) + "</td><td class='num'>" + n(tot.gateout) + "</td><td class='num'>" + n(tot.delivered) + "</td></tr>"
+      : "<tr><td colspan='4' class='empty-state'>No days in this period.</td></tr>";
+  }
+  document.getElementById("dashViewSeg").addEventListener("click", function (e) {
+    var b = e.target.closest("button");
+    if (!b) return;
+    dashView = b.getAttribute("data-view");
+    if (dashData) dashRenderTable(dashData); else dashRenderDateWise(null);
+  });
 
   function loadDashboard() {
     dashRenderFilters();
@@ -4063,7 +4107,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     if (dashHubs !== null && !ids.length) {
       dashData = null;
       document.getElementById("dashAsOf").textContent = "";
-      ["dashKpis", "dashToday", "dashMini", "dashHubHead"].forEach(function (id) { document.getElementById(id).innerHTML = ""; });
+      ["dashKpis", "dashToday", "dashMini", "dashHubHead", "dashDateBody"].forEach(function (id) { document.getElementById(id).innerHTML = ""; });
       document.getElementById("dashHubBody").innerHTML = "<tr><td class='empty-state'>Pick at least one hub to see the dashboard.</td></tr>";
       return Promise.resolve();
     }
@@ -4131,6 +4175,12 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     if (!dashData) return;
     var d = dashData, period = d.months.length ? d.months.map(monthLabel).join(", ") : "", cols = dashVisibleCols();
     var allHubs = !d.hubIds || !d.hubIds.length;
+    if (dashView === "date") {
+      downloadCsv("rtv-dashboard-datewise-" + istToday() + (d.location ? "-" + d.location.toLowerCase() : "") + (allHubs ? "" : "-" + d.hubs.length + "-hubs") + ".csv",
+        ["Date", "Packed shipments", "Gate-out shipments", "Delivered shipments"],
+        (d.dateWise || []).map(function (r) { return [r.date, r.packed, r.gateout, r.delivered]; }));
+      return;
+    }
     downloadCsv("rtv-dashboard-" + istToday() + (d.location ? "-" + d.location.toLowerCase() : "") + (allHubs ? "" : "-" + d.hubs.length + "-hubs") + ".csv",
       ["Hub"].concat(cols.map(function (c) { return dashColLabel(c, period); })),
       d.hubs.concat([Object.assign({}, d.totals, { name: allHubs ? "All hubs" : "Selected hubs" })]).map(function (h) {
