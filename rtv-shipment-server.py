@@ -2280,13 +2280,18 @@ class Handler(BaseHTTPRequestHandler):
                 on = r["day"] if not isinstance(r["day"], str) else datetime.strptime(r["day"], "%Y-%m-%d").date()
                 if on in by_day:
                     by_day[on][r["kind"]] += int(r["n"])
-            # Returns generated: distinct return tracking IDs by Return Created
-            # At (daily dump). Returns have no brand yet, so not split by location.
+            # Returns generated: distinct return tracking IDs by the Pending to
+            # Scan clock start (RTO / Home Trial → Return Created At, else
+            # Picked Up At), over every return — packed or closed ones too.
+            # Returns have no brand yet, so not split by location.
             if not location:
                 h_sql, h_params = hub_f("hub_id")
                 for r in conn.execute(
-                    "SELECT (return_created_at AT TIME ZONE 'Asia/Kolkata')::date AS day, COUNT(DISTINCT return_tracking_id) AS n "
-                    "FROM returns WHERE return_created_at >= %s AND return_created_at < %s" + h_sql + " GROUP BY 1",
+                    "SELECT (clock_start AT TIME ZONE 'Asia/Kolkata')::date AS day, COUNT(DISTINCT return_tracking_id) AS n "
+                    "FROM (SELECT return_tracking_id, hub_id, "
+                    "CASE WHEN return_type ILIKE 'rto%%' OR return_type ILIKE '%%home trial%%' "
+                    "THEN return_created_at ELSE picked_up_at END AS clock_start FROM returns) r "
+                    "WHERE clock_start >= %s AND clock_start < %s" + h_sql + " GROUP BY 1",
                     ((datetime.combine(dw_start, datetime.min.time(), IST)).isoformat(),
                      (datetime.combine(dw_end + timedelta(days=1), datetime.min.time(), IST)).isoformat(), *h_params),
                 ).fetchall():
