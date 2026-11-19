@@ -879,6 +879,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
           <button type="button" data-view="date" aria-pressed="false">Date wise</button>
         </div>
         <button type="button" class="btn small secondary" id="dashCsv">Download CSV</button>
+        <button type="button" class="btn small" id="dashShipCsv" style="display:none;" title="One row per shipment: invoice, tracking ID, packed / gate-out / delivered dates">Export shipments</button>
       </div>
     </div>
     <p class="hint" id="dashDateNote" style="display:none; margin:0 0 8px;"></p>
@@ -887,7 +888,7 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     </div>
     <div class="table-wrap" id="dashDateWrap" style="display:none;">
       <table class="data-table dash-hubs">
-        <thead><tr><th>Date</th><th class="num">Packed</th><th class="num">Gate-out</th><th class="num">Delivered</th></tr></thead>
+        <thead><tr><th>Packed date</th><th class="num">Packed</th><th class="num">Gate-out</th><th class="num">Gate-out %</th><th class="num">Pending gate-out</th><th class="num">Delivered</th><th class="num">Delivered %</th><th class="num">Pending delivery</th></tr></thead>
         <tbody id="dashDateBody"></tbody>
       </table>
     </div>
@@ -4071,7 +4072,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     dashRenderDateWise(d);
   }
 
-  // ---- date-wise view: packed / gate-out / delivered shipments per IST day ----
+  // ---- date-wise view: shipments by the day they were packed, and how many
+  // of those have since gone through gate-out and been delivered ----
   var dashView = "hub";
   function dashFmtDay(iso) {
     return new Date(iso + "T00:00:00Z").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
@@ -4082,19 +4084,60 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     document.getElementById("dashHubWrap").style.display = isDate ? "none" : "";
     document.getElementById("dashDateWrap").style.display = isDate ? "" : "none";
     document.getElementById("dashColPicker").closest(".field").style.visibility = isDate ? "hidden" : "";
+    document.getElementById("dashShipCsv").style.display = isDate ? "" : "none";
     var note = document.getElementById("dashDateNote");
     note.style.display = isDate ? "block" : "none";
     if (!d) return;
     var rows = d.dateWise || [];
-    note.textContent = "Shipments = distinct return tracking IDs. Packed by invoice date, gate-out by scan date, delivered by the delivery date the store entered. " +
+    note.textContent = "Shipments (distinct return tracking IDs) by the day they were packed. Gate-out and Delivered count how many of that day's packed shipments have since been gate-out scanned and delivered, whenever that happened. " +
+      "Gate-out % = gate-out ÷ packed; Delivered % = delivered ÷ gate-out. A shipment packed again on a second invoice counts once, on its first packed day. " +
       (d.months.length ? "Every day of " + d.months.map(monthLabel).join(", ") + "." : "Last 30 days — pick months above for older dates.");
     var tot = rows.reduce(function (a, r) { a.packed += r.packed; a.gateout += r.gateout; a.delivered += r.delivered; return a; }, { packed: 0, gateout: 0, delivered: 0 });
     function cell(v) { return "<td class='num'>" + n(v) + "</td>"; }
+    function pctCell(v) { return "<td class='num" + (v == null ? " na" : "") + "'>" + (v == null ? "—" : v.toFixed(1) + "%") + "</td>"; }
+    function line(label, r) {
+      var c = dashLifecycle(r);
+      return "<td style='white-space:nowrap'>" + label + "</td>" + cell(r.packed) + cell(r.gateout) + pctCell(c.gatePct) + cell(c.pendingGate) +
+        cell(r.delivered) + pctCell(c.delivPct) + cell(c.pendingDeliv);
+    }
     document.getElementById("dashDateBody").innerHTML = rows.length ? rows.map(function (r) {
-      return "<tr><td>" + escapeHtml(dashFmtDay(r.date)) + "</td>" + cell(r.packed) + cell(r.gateout) + cell(r.delivered) + "</tr>";
-    }).join("") + "<tr class='total'><td>Total</td>" + cell(tot.packed) + cell(tot.gateout) + cell(tot.delivered) + "</tr>"
-      : "<tr><td colspan='4' class='empty-state'>No days in this period.</td></tr>";
+      return "<tr>" + line(escapeHtml(dashFmtDay(r.date)), r) + "</tr>";
+    }).join("") + "<tr class='total'>" + line("Total", tot) + "</tr>"
+      : "<tr><td colspan='8' class='empty-state'>No days in this period.</td></tr>";
   }
+  function dashLifecycle(r) {
+    return {
+      gatePct: r.packed ? r.gateout * 100 / r.packed : null,
+      delivPct: r.gateout ? r.delivered * 100 / r.gateout : null,
+      pendingGate: r.packed - r.gateout,
+      pendingDeliv: r.gateout - r.delivered,
+    };
+  }
+  // Shipment-level export: same filters as the dashboard (months, hubs, location).
+  document.getElementById("dashShipCsv").addEventListener("click", function () {
+    var btn = this, qs = [], ids = dashSelectedIds();
+    if (dashMonths.length) qs.push("months=" + encodeURIComponent(dashMonths.join(",")));
+    if (dashHubs !== null) {
+      if (!ids.length) { toast("Pick at least one hub first.", true); return; }
+      qs.push("hubs=" + encodeURIComponent(ids.join(",")));
+    }
+    if (dashLoc) qs.push("location=" + encodeURIComponent(dashLoc));
+    btn.disabled = true;
+    var old = btn.textContent;
+    btn.textContent = "Preparing…";
+    fetch("/api/dashboard/shipments.csv" + (qs.length ? "?" + qs.join("&") : ""), { credentials: "same-origin" }).then(function (res) {
+      if (!res.ok) return res.json().then(function (j) { throw new Error(j.error || ("HTTP " + res.status)); });
+      var m = /filename=([^;]+)/.exec(res.headers.get("Content-Disposition") || "");
+      return res.blob().then(function (b) {
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(b);
+        a.download = m ? m[1] : "rtv-shipment-lifecycle.csv";
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+      });
+    }).catch(function (err) { toast("Couldn't export shipments: " + err.message, true); })
+      .then(function () { btn.disabled = false; btn.textContent = old; });
+  });
   document.getElementById("dashViewSeg").addEventListener("click", function (e) {
     var b = e.target.closest("button");
     if (!b) return;
@@ -4178,8 +4221,12 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     var allHubs = !d.hubIds || !d.hubIds.length;
     if (dashView === "date") {
       downloadCsv("rtv-dashboard-datewise-" + istToday() + (d.location ? "-" + d.location.toLowerCase() : "") + (allHubs ? "" : "-" + d.hubs.length + "-hubs") + ".csv",
-        ["Date", "Packed shipments", "Gate-out shipments", "Delivered shipments"],
-        (d.dateWise || []).map(function (r) { return [r.date, r.packed, r.gateout, r.delivered]; }));
+        ["Packed date", "Packed", "Gate-out", "Gate-out %", "Pending gate-out", "Delivered", "Delivered %", "Pending delivery"],
+        (d.dateWise || []).map(function (r) {
+          var c = dashLifecycle(r);
+          return [r.date, r.packed, r.gateout, c.gatePct == null ? "" : c.gatePct.toFixed(1), c.pendingGate,
+                  r.delivered, c.delivPct == null ? "" : c.delivPct.toFixed(1), c.pendingDeliv];
+        }));
       return;
     }
     downloadCsv("rtv-dashboard-" + istToday() + (d.location ? "-" + d.location.toLowerCase() : "") + (allHubs ? "" : "-" + d.hubs.length + "-hubs") + ".csv",

@@ -1340,6 +1340,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/dashboard":
                 return self.dashboard((qs.get("months") or [""])[0].strip(), (qs.get("hubs") or [""])[0].strip(),
                                       (qs.get("location") or [""])[0].strip())
+            if path == "/api/dashboard/shipments.csv":
+                return self.shipments_lifecycle_export((qs.get("months") or [""])[0].strip(), (qs.get("hubs") or [""])[0].strip(),
+                                                       (qs.get("location") or [""])[0].strip())
             if path == "/api/daily-report":
                 return self.daily_report((qs.get("date") or [""])[0].strip(), (qs.get("hubs") or [""])[0].strip())
             if path == "/api/tickets":
@@ -2093,15 +2096,7 @@ class Handler(BaseHTTPRequestHandler):
     # come back as null under a location filter (listed in "notSplit").
     def dashboard(self, months="", hub_ids="", location=""):
         self.require_admin()
-        sel = sorted({m for m in months.split(",") if m})
-        if any(not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", m) for m in sel):
-            raise ApiError(400, "months must look like 2026-10,2026-09")
-        try:
-            hubs_sel = sorted({int(x) for x in hub_ids.split(",") if x.strip()})
-        except ValueError:
-            raise ApiError(400, "hubs must be a comma-separated list of hub IDs")
-        if location not in ("", "Local", "Non-Local"):
-            raise ApiError(400, "location must be Local or Non-Local")
+        sel, hubs_sel = self.parse_dashboard_filters(months, hub_ids, location)
 
         def hub_f(col):
             return (f" AND {col} = ANY(%s)", [hubs_sel]) if hubs_sel else ("", [])
@@ -2265,51 +2260,20 @@ class Handler(BaseHTTPRequestHandler):
         for r in conn.execute(c_sql, c_params).fetchall():
             closures[r["reason"]] = r["n"]
 
-        # Date wise: shipments (distinct return tracking IDs) packed, gate-out
-        # scanned and delivered per IST day — same rules as the Daily report.
-        # Selected months → every day of them up to today; else the last 30 days.
-        today_d = today_ist.date()
-        if sel:
-            first = datetime.strptime(sel[0] + "-01", "%Y-%m-%d").date()
-            y, mo = map(int, sel[-1].split("-"))
-            last_d = (datetime(y + mo // 12, mo % 12 + 1, 1).date() - timedelta(days=1))
-            dw_start, dw_end = first, min(last_d, today_d)
-        else:
-            dw_start, dw_end = today_d - timedelta(days=29), today_d
-        by_day = {}
-        d = dw_end
-        while d >= dw_start:
-            if not sel or d.strftime("%Y-%m") in sel:
-                by_day[d] = {"date": d.isoformat(), "packed": 0, "gateout": 0, "delivered": 0}
-            d -= timedelta(days=1)
-        if by_day:
-            x_sql, x_params = filters("s.hub_id", "s.vendor_id")
-            loose = (dw_start - timedelta(days=1)).isoformat()
-            for r in conn.execute(
-                """
-                WITH items AS (
-                    SELECT si.tracking_id,
-                           (s.created_at::timestamptz AT TIME ZONE 'Asia/Kolkata')::date AS packed_day,
-                           (s.dispatched_at::timestamptz AT TIME ZONE 'Asia/Kolkata')::date AS gate_day,
-                           CASE WHEN s.delivered_at IS NOT NULL THEN NULLIF(s.delivered_on, '')::date END AS deliv_day
-                    FROM shipments s
-                    JOIN shipment_items si ON si.shipment_id = s.id
-                    WHERE (s.created_at >= %s OR s.dispatched_at >= %s OR s.delivered_on >= %s) {x_sql}
-                )
-                SELECT 'packed' AS kind, packed_day AS day, COUNT(DISTINCT tracking_id) AS n
-                FROM items WHERE packed_day BETWEEN %s AND %s GROUP BY packed_day
-                UNION ALL
-                SELECT 'gateout', gate_day, COUNT(DISTINCT tracking_id)
-                FROM items WHERE gate_day BETWEEN %s AND %s GROUP BY gate_day
-                UNION ALL
-                SELECT 'delivered', deliv_day, COUNT(DISTINCT tracking_id)
-                FROM items WHERE deliv_day BETWEEN %s AND %s GROUP BY deliv_day
-                """.format(x_sql=x_sql),
-                (loose, loose, loose, *x_params, dw_start, dw_end, dw_start, dw_end, dw_start, dw_end),
-            ).fetchall():
-                on = r["day"] if not isinstance(r["day"], str) else datetime.strptime(r["day"], "%Y-%m-%d").date()
-                if on in by_day:
-                    by_day[on][r["kind"]] += int(r["n"])
+        # Date wise (shipment lifecycle): shipments grouped by the day they
+        # were packed, and how many of those have since gone through gate-out
+        # and been delivered. Same rows as the shipment-level export.
+        dw_start, dw_end, days = self.lifecycle_days(sel)
+        by_day = {d: {"date": d.isoformat(), "packed": 0, "gateout": 0, "delivered": 0} for d in days}
+        for r in self.lifecycle_rows(conn, dw_start, dw_end, sel, hubs_sel, location):
+            row = by_day.get(r["packed_day"])
+            if row is None:
+                continue
+            row["packed"] += 1
+            if r["gate_at"] is not None:
+                row["gateout"] += 1
+                if r["deliv_at"] is not None:
+                    row["delivered"] += 1
         date_wise = list(by_day.values())
 
         last = conn.execute("SELECT * FROM dump_imports ORDER BY id DESC LIMIT 1").fetchone()
@@ -2331,6 +2295,138 @@ class Handler(BaseHTTPRequestHandler):
                 "rows": last["total_rows"] - last["blank_rows"], "inserted": last["inserted"], "updated": last["updated"],
             } if last else None,
         })
+
+    @staticmethod
+    def parse_dashboard_filters(months, hub_ids, location):
+        sel = sorted({m for m in months.split(",") if m})
+        if any(not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", m) for m in sel):
+            raise ApiError(400, "months must look like 2026-10,2026-09")
+        try:
+            hubs_sel = sorted({int(x) for x in hub_ids.split(",") if x.strip()})
+        except ValueError:
+            raise ApiError(400, "hubs must be a comma-separated list of hub IDs")
+        if location not in ("", "Local", "Non-Local"):
+            raise ApiError(400, "location must be Local or Non-Local")
+        return sel, hubs_sel
+
+    @staticmethod
+    def lifecycle_days(sel):
+        """Packed-date range for the Date wise view and its export: every day
+        of the selected months up to today, else the last 30 days (IST)."""
+        today_d = datetime.now(IST).date()
+        if sel:
+            first = datetime.strptime(sel[0] + "-01", "%Y-%m-%d").date()
+            y, mo = map(int, sel[-1].split("-"))
+            last_d = datetime(y + mo // 12, mo % 12 + 1, 1).date() - timedelta(days=1)
+            start, end = first, min(last_d, today_d)
+        else:
+            start, end = today_d - timedelta(days=29), today_d
+        days, d = [], end
+        while d >= start:
+            if not sel or d.strftime("%Y-%m") in sel:
+                days.append(d)
+            d -= timedelta(days=1)
+        return start, end, days
+
+    LIFECYCLE_SQL = """
+        WITH items AS (
+            SELECT si.tracking_id, s.id AS sid, s.invoice_no, s.hub_id, s.vendor_id,
+                   NULLIF(s.created_at, '')::timestamptz AS packed_at,
+                   NULLIF(s.dispatched_at, '')::timestamptz AS gate_at,
+                   CASE WHEN NULLIF(s.dispatched_at, '') IS NOT NULL
+                        THEN NULLIF(s.delivered_at, '')::timestamptz END AS deliv_at,
+                   CASE WHEN NULLIF(s.dispatched_at, '') IS NOT NULL AND NULLIF(s.delivered_at, '') IS NOT NULL
+                        THEN NULLIF(s.delivered_on, '') END AS deliv_on
+            FROM shipment_items si
+            JOIN shipments s ON s.id = si.shipment_id
+        ),
+        -- The invoice that got furthest (delivered, else gated out, else the
+        -- latest) speaks for the shipment: its number, hub and brand.
+        eff AS (
+            SELECT DISTINCT ON (tracking_id) tracking_id, sid, invoice_no, hub_id, vendor_id
+            FROM items
+            ORDER BY tracking_id, (deliv_at IS NOT NULL) DESC, (gate_at IS NOT NULL) DESC, packed_at DESC, sid DESC
+        ),
+        agg AS (
+            SELECT tracking_id, MIN(packed_at) AS packed_at, MIN(gate_at) AS gate_at,
+                   MIN(deliv_at) AS deliv_at, MIN(deliv_on) AS deliv_on,
+                   string_agg(DISTINCT invoice_no, ', ') AS all_invoices
+            FROM items GROUP BY tracking_id
+        )
+        SELECT e.tracking_id, e.invoice_no, e.hub_id, e.vendor_id, h.name AS hub, v.name AS brand,
+               a.packed_at, a.gate_at, a.deliv_at, a.deliv_on, a.all_invoices,
+               (a.packed_at AT TIME ZONE 'Asia/Kolkata')::date AS packed_day
+        FROM eff e
+        JOIN agg a ON a.tracking_id = e.tracking_id
+        LEFT JOIN hubs h ON h.id = e.hub_id
+        LEFT JOIN vendors v ON v.id = e.vendor_id
+        WHERE (a.packed_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN %s AND %s {filters}
+        ORDER BY a.packed_at, e.tracking_id
+    """
+
+    def lifecycle_rows(self, conn, start, end, sel, hubs_sel, location):
+        """One row per shipment (return tracking ID) first packed between
+        start and end (IST days, limited to the selected months). A tracking
+        ID packed on more than one invoice (a repack) still counts once:
+        packed = its first pack, gate-out / delivered = the earliest on any
+        of its invoices, and delivered only counts once it has gone through
+        gate-out, so delivered ⊆ gate-out ⊆ packed."""
+        f_sql, f_params = "", []
+        if sel:
+            f_sql += " AND to_char(a.packed_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') = ANY(%s)"
+            f_params.append(sel)
+        if hubs_sel:
+            f_sql += " AND e.hub_id = ANY(%s)"
+            f_params.append(hubs_sel)
+        if location:
+            f_sql += " AND v.return_location = %s"
+            f_params.append(location)
+        return conn.execute(self.LIFECYCLE_SQL.format(filters=f_sql), (start, end, *f_params)).fetchall()
+
+    def shipments_lifecycle_export(self, months="", hub_ids="", location=""):
+        """CSV, one row per shipment, for the Dashboard's Date wise filters."""
+        self.require_admin()
+        sel, hubs_sel = self.parse_dashboard_filters(months, hub_ids, location)
+        start, end, _ = self.lifecycle_days(sel)
+        conn = get_db()
+        rows = self.lifecycle_rows(conn, start, end, sel, hubs_sel, location)
+        conn.close()
+
+        def ts(v):
+            return v.astimezone(IST).strftime("%d-%m-%Y %H:%M:%S") if v else ""
+
+        def csv_field(v):
+            s = "" if v is None else str(v)
+            if any(c in s for c in (',', '"', '\n')):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        header = ["Invoice ID", "Shipment ID", "Packed Date", "Gate Out Date", "Delivered Date",
+                  "Delivered Marked At", "Hub", "Brand", "All invoices"]
+        lines = [",".join(header)]
+        for r in rows:
+            deliv_on = ""
+            if r["deliv_on"]:
+                try:
+                    deliv_on = datetime.strptime(r["deliv_on"], "%Y-%m-%d").strftime("%d-%m-%Y")
+                except ValueError:
+                    deliv_on = r["deliv_on"]
+            lines.append(",".join(csv_field(x) for x in (
+                r["invoice_no"], r["tracking_id"], ts(r["packed_at"]), ts(r["gate_at"]), deliv_on,
+                ts(r["deliv_at"]), r["hub"] or "Hub not matched", r["brand"] or "",
+                r["all_invoices"] if r["all_invoices"] and "," in r["all_invoices"] else "",
+            )))
+        # BOM so Excel opens the UTF-8 file with the right characters.
+        body = ("﻿" + "\r\n".join(lines) + "\r\n").encode("utf-8")
+        name = "rtv-shipment-lifecycle-" + start.isoformat() + "-to-" + end.isoformat() + \
+               (("-" + location.lower()) if location else "") + (("-" + str(len(hubs_sel)) + "-hubs") if hubs_sel else "") + ".csv"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/csv; charset=utf-8")
+        self.send_header("Content-Disposition", "attachment; filename=" + name)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def daily_report(self, day="", hub_ids=""):
         """Admin daily report: shipments (distinct return tracking IDs) packed,
