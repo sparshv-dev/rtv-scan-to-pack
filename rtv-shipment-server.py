@@ -2280,7 +2280,7 @@ class Handler(BaseHTTPRequestHandler):
         d = dw_end
         while d >= dw_start:
             if not sel or d.strftime("%Y-%m") in sel:
-                by_day[d] = {"date": d.isoformat(), "generated": 0, "packed": 0, "gateout": 0, "delivered": 0}
+                by_day[d] = {"date": d.isoformat(), "packed": 0, "gateout": 0, "delivered": 0}
             d -= timedelta(days=1)
         if by_day:
             x_sql, x_params = filters("s.hub_id", "s.vendor_id")
@@ -2310,24 +2310,6 @@ class Handler(BaseHTTPRequestHandler):
                 on = r["day"] if not isinstance(r["day"], str) else datetime.strptime(r["day"], "%Y-%m-%d").date()
                 if on in by_day:
                     by_day[on][r["kind"]] += int(r["n"])
-            # Returns generated: distinct return tracking IDs by the Pending to
-            # Scan clock start (RTO / Home Trial → Return Created At, else
-            # Picked Up At), over every return — packed or closed ones too.
-            # Location filter: by the seller's usual brand location (seller_f).
-            h_sql, h_params = hub_f("hub_id")
-            s_sql, s_params = seller_f("seller_name")
-            for r in conn.execute(
-                "SELECT (clock_start AT TIME ZONE 'Asia/Kolkata')::date AS day, COUNT(DISTINCT return_tracking_id) AS n "
-                "FROM (SELECT return_tracking_id, hub_id, seller_name, "
-                "CASE WHEN return_type ILIKE 'rto%%' OR return_type ILIKE '%%home trial%%' "
-                "THEN return_created_at ELSE picked_up_at END AS clock_start FROM returns) r "
-                "WHERE clock_start >= %s AND clock_start < %s" + h_sql + s_sql + " GROUP BY 1",
-                ((datetime.combine(dw_start, datetime.min.time(), IST)).isoformat(),
-                 (datetime.combine(dw_end + timedelta(days=1), datetime.min.time(), IST)).isoformat(), *h_params, *s_params),
-            ).fetchall():
-                on = r["day"] if not isinstance(r["day"], str) else datetime.strptime(r["day"], "%Y-%m-%d").date()
-                if on in by_day:
-                    by_day[on]["generated"] = int(r["n"])
         date_wise = list(by_day.values())
 
         last = conn.execute("SELECT * FROM dump_imports ORDER BY id DESC LIMIT 1").fetchone()
