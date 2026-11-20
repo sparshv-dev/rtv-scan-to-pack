@@ -17,6 +17,10 @@
 }
 :root[data-theme="dark"] { --ink:#EDEFF3; --paper:#0A0C10; --paper-raised:#12151C; --accent:#4C8DFF; --line:#242A35; --muted:#5C6373; --zebra:#181C25; --bad:#F0575B; --good:#34D399; --warn:#F5A623; --shadow:rgba(0,0,0,0.45); }
 :root[data-theme="light"] { --ink:#1A1D24; --paper:#F5F6F8; --paper-raised:#FFFFFF; --accent:#2F6FEB; --line:#E3E6EC; --muted:#8A93A3; --zebra:#F0F1F4; --bad:#D63C3C; --good:#0E7A56; --warn:#B36B00; --shadow:rgba(20, 30, 50, 0.10); }
+/* Date wise table: gate-out column colour (packed = --accent, delivered = --good). */
+:root { --violet: #7C3AED; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --violet: #A78BFA; } }
+:root[data-theme="dark"] { --violet: #A78BFA; }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: 'IBM Plex Sans',-apple-system,"Segoe UI","Helvetica Neue",Arial,sans-serif; }
@@ -285,6 +289,16 @@ body.is-admin .hub-only { display: none !important; }
 .seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
 .dash-loc-note { margin: -6px 0 14px !important; }
 .dash-hubs td.na { color: var(--muted); }
+.dash-life th { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.dash-life th.c-date, .dash-life td.c-date { color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dash-life .c-packed { color: var(--accent); }
+.dash-life .c-gate { color: var(--violet); }
+.dash-life .c-deliv { color: var(--good); }
+.dash-life th.c-date { color: var(--muted); }
+.dash-life td.hi { font-weight: 800; }
+.dash-life td.zero { color: var(--muted); }
+.dash-life td.stuck { color: var(--bad); font-weight: 800; }
+.dash-life tr.empty td { color: var(--muted); }
 .dr-hub-list .col-group { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 8px 8px 2px; }
 .dr-tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--paper); font-size: 12px; padding: 7px 10px; border-radius: 7px; box-shadow: 0 8px 20px var(--shadow); display: none; z-index: 60; line-height: 1.5; }
 .mini-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
@@ -887,8 +901,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       <table class="data-table dash-hubs"><thead><tr id="dashHubHead"></tr></thead><tbody id="dashHubBody"></tbody></table>
     </div>
     <div class="table-wrap" id="dashDateWrap" style="display:none;">
-      <table class="data-table dash-hubs">
-        <thead><tr><th>Packed date</th><th class="num">Packed</th><th class="num">Gate-out</th><th class="num">Gate-out %</th><th class="num">Pending gate-out</th><th class="num">Delivered</th><th class="num">Delivered %</th><th class="num">Pending delivery</th></tr></thead>
+      <table class="data-table dash-hubs dash-life">
+        <thead><tr><th class="c-date">Date</th><th class="num c-packed">Packed</th><th class="num c-gate">Gate-out</th><th class="num c-deliv">Delivered</th></tr></thead>
         <tbody id="dashDateBody"></tbody>
       </table>
     </div>
@@ -4075,9 +4089,6 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   // ---- date-wise view: shipments by the day they were packed, and how many
   // of those have since gone through gate-out and been delivered ----
   var dashView = "hub";
-  function dashFmtDay(iso) {
-    return new Date(iso + "T00:00:00Z").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-  }
   function dashRenderDateWise(d) {
     var isDate = dashView === "date";
     document.querySelectorAll("#dashViewSeg button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-view") === dashView)); });
@@ -4089,30 +4100,37 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     note.style.display = isDate ? "block" : "none";
     if (!d) return;
     var rows = d.dateWise || [];
-    note.textContent = "Shipments (distinct return tracking IDs) by the day they were packed. Gate-out and Delivered count how many of that day's packed shipments have since been gate-out scanned and delivered, whenever that happened. " +
-      "Gate-out % = gate-out ÷ packed; Delivered % = delivered ÷ gate-out. A shipment packed again on a second invoice counts once, on its first packed day. " +
+    note.textContent = "Shipments (distinct return tracking IDs) by the day they were packed; Gate-out and Delivered are how many of that day's packed shipments have since gone through gate-out and been delivered. " +
+      "Bold = well above the period's daily average; red 0 = packed that day but nothing gated out yet. " +
       (d.months.length ? "Every day of " + d.months.map(monthLabel).join(", ") + "." : "Last 30 days — pick months above for older dates.");
     var tot = rows.reduce(function (a, r) { a.packed += r.packed; a.gateout += r.gateout; a.delivered += r.delivered; return a; }, { packed: 0, gateout: 0, delivered: 0 });
-    function cell(v) { return "<td class='num'>" + n(v) + "</td>"; }
-    function pctCell(v) { return "<td class='num" + (v == null ? " na" : "") + "'>" + (v == null ? "—" : v.toFixed(1) + "%") + "</td>"; }
-    function line(label, r) {
-      var c = dashLifecycle(r);
-      return "<td style='white-space:nowrap'>" + label + "</td>" + cell(r.packed) + cell(r.gateout) + pctCell(c.gatePct) + cell(c.pendingGate) +
-        cell(r.delivered) + pctCell(c.delivPct) + cell(c.pendingDeliv);
+    // "Well above average": 15% over the mean of the days that had any.
+    function highMark(key) {
+      var vals = rows.map(function (r) { return r[key]; }).filter(function (v) { return v > 0; });
+      var mean = vals.length ? vals.reduce(function (a, b) { return a + b; }, 0) / vals.length : 0;
+      return vals.length >= 3 ? mean * 1.15 : Infinity;
+    }
+    var hi = { packed: highMark("packed"), gateout: highMark("gateout"), delivered: highMark("delivered") };
+    function cell(r, key, cls, total) {
+      var v = r[key], extra = "";
+      if (!total) {
+        if (key === "gateout" && v === 0 && r.packed > 0) extra = " stuck";
+        else if (v === 0) extra = " zero";
+        else if (v >= hi[key]) extra = " hi";
+      }
+      return "<td class='num " + cls + extra + "'>" + n(v) + "</td>";
+    }
+    function line(label, r, total) {
+      return "<td class='c-date'>" + label + "</td>" + cell(r, "packed", "c-packed", total) +
+        cell(r, "gateout", "c-gate", total) + cell(r, "delivered", "c-deliv", total);
     }
     document.getElementById("dashDateBody").innerHTML = rows.length ? rows.map(function (r) {
-      return "<tr>" + line(escapeHtml(dashFmtDay(r.date)), r) + "</tr>";
-    }).join("") + "<tr class='total'>" + line("Total", tot) + "</tr>"
-      : "<tr><td colspan='8' class='empty-state'>No days in this period.</td></tr>";
+      var empty = !r.packed && !r.gateout && !r.delivered;
+      return "<tr" + (empty ? " class='empty'" : "") + ">" + line(dashFmtDdMm(r.date), r) + "</tr>";
+    }).join("") + "<tr class='total'>" + line("Total", tot, true) + "</tr>"
+      : "<tr><td colspan='4' class='empty-state'>No days in this period.</td></tr>";
   }
-  function dashLifecycle(r) {
-    return {
-      gatePct: r.packed ? r.gateout * 100 / r.packed : null,
-      delivPct: r.gateout ? r.delivered * 100 / r.gateout : null,
-      pendingGate: r.packed - r.gateout,
-      pendingDeliv: r.gateout - r.delivered,
-    };
-  }
+  function dashFmtDdMm(iso) { var p = iso.split("-"); return p[2] + "-" + p[1] + "-" + p[0]; }
   // Shipment-level export: same filters as the dashboard (months, hubs, location).
   document.getElementById("dashShipCsv").addEventListener("click", function () {
     var btn = this, qs = [], ids = dashSelectedIds();
@@ -4221,12 +4239,8 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     var allHubs = !d.hubIds || !d.hubIds.length;
     if (dashView === "date") {
       downloadCsv("rtv-dashboard-datewise-" + istToday() + (d.location ? "-" + d.location.toLowerCase() : "") + (allHubs ? "" : "-" + d.hubs.length + "-hubs") + ".csv",
-        ["Packed date", "Packed", "Gate-out", "Gate-out %", "Pending gate-out", "Delivered", "Delivered %", "Pending delivery"],
-        (d.dateWise || []).map(function (r) {
-          var c = dashLifecycle(r);
-          return [r.date, r.packed, r.gateout, c.gatePct == null ? "" : c.gatePct.toFixed(1), c.pendingGate,
-                  r.delivered, c.delivPct == null ? "" : c.delivPct.toFixed(1), c.pendingDeliv];
-        }));
+        ["Date", "Packed", "Gate-out", "Delivered"],
+        (d.dateWise || []).map(function (r) { return [dashFmtDdMm(r.date), r.packed, r.gateout, r.delivered]; }));
       return;
     }
     downloadCsv("rtv-dashboard-" + istToday() + (d.location ? "-" + d.location.toLowerCase() : "") + (allHubs ? "" : "-" + d.hubs.length + "-hubs") + ".csv",
