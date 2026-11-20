@@ -299,6 +299,11 @@ body.is-admin .hub-only { display: none !important; }
 .dash-life td.zero { color: var(--muted); }
 .dash-life td.stuck { color: var(--bad); font-weight: 800; }
 .dash-life tr.empty td { color: var(--muted); }
+/* Bordered grid with tight rows. */
+table.data-table.dash-life { --grid: var(--line); --grid: color-mix(in srgb, var(--line) 55%, var(--muted)); border: 1px solid var(--grid); }
+table.data-table.dash-life th, table.data-table.dash-life td { border: 1px solid var(--grid); padding: 3px 10px; line-height: 1.3; vertical-align: middle; }
+table.data-table.dash-life th { padding-top: 5px; padding-bottom: 5px; background: var(--zebra); }
+table.data-table.dash-life tr.total td { border-top: 2px solid var(--grid); }
 .dash-life-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 4px 0 10px; }
 .dash-life-head h3 { margin: 0; font-size: 16px; font-weight: 800; color: var(--ink); }
 .dr-hub-list .col-group { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 8px 8px 2px; }
@@ -4154,15 +4159,19 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
   document.getElementById("dashDateCopy").addEventListener("click", function () {
     var btn = this, d = dashData;
     if (!d || !dashDateRows.length) { toast("Nothing to copy yet.", true); return; }
-    var heading = dashHubsHeading(d) + (d.location ? " · " + d.location + " brands" : "") +
-      " · " + (d.months.length ? d.months.map(monthLabel).join(", ") : "Last 30 days");
+    // Line 1 = the heading exactly as shown over the table; line 2 = filters.
+    var heading = document.getElementById("dashDateHubs").textContent;
+    var sub = (d.location ? d.location + " brands · " : "") + (d.months.length ? d.months.map(monthLabel).join(", ") : "Last 30 days");
     var tot = dashDateRows.reduce(function (a, r) { a.packed += r.packed; a.gateout += r.gateout; a.delivered += r.delivered; return a; }, { packed: 0, gateout: 0, delivered: 0 });
     var body = dashDateRows.map(function (r) { return [dashFmtDdMm(r.date), r.packed, r.gateout, r.delivered]; })
       .concat([["Total", tot.packed, tot.gateout, tot.delivered]]);
     var head = ["Date", "Packed", "Gate-out", "Delivered"];
-    var text = heading + "\n" + [head].concat(body).map(function (r) { return r.join("\t"); }).join("\n");
-    var td = "padding:4px 10px;border:1px solid #ddd;", num = td + "text-align:right;";
-    var html = "<p><b>" + escapeHtml(heading) + "</b></p><table style='border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px'>" +
+    var text = heading + "\n" + sub + "\n" + [head].concat(body).map(function (r) { return r.join("\t"); }).join("\n");
+    var td = "padding:2px 8px;border:1px solid #bbb;", num = td + "text-align:right;";
+    // Heading rows live inside the table so Excel / Sheets keep them on paste.
+    var html = "<table style='border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px'>" +
+      "<tr><td colspan='4' style='" + td + "font-weight:bold;font-size:15px'>" + escapeHtml(heading) + "</td></tr>" +
+      "<tr><td colspan='4' style='" + td + "color:#666'>" + escapeHtml(sub) + "</td></tr>" +
       "<tr>" + head.map(function (h, i) { return "<th style='" + (i ? num : td) + "background:#f3f4f6'>" + h + "</th>"; }).join("") + "</tr>" +
       body.map(function (r, j) {
         var b = j === body.length - 1 ? "font-weight:bold;" : "";
