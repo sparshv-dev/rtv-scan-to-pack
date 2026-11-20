@@ -299,6 +299,8 @@ body.is-admin .hub-only { display: none !important; }
 .dash-life td.zero { color: var(--muted); }
 .dash-life td.stuck { color: var(--bad); font-weight: 800; }
 .dash-life tr.empty td { color: var(--muted); }
+.dash-life-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 4px 0 10px; }
+.dash-life-head h3 { margin: 0; font-size: 16px; font-weight: 800; color: var(--ink); }
 .dr-hub-list .col-group { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 8px 8px 2px; }
 .dr-tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--paper); font-size: 12px; padding: 7px 10px; border-radius: 7px; box-shadow: 0 8px 20px var(--shadow); display: none; z-index: 60; line-height: 1.5; }
 .mini-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
@@ -900,11 +902,17 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     <div class="table-wrap" id="dashHubWrap">
       <table class="data-table dash-hubs"><thead><tr id="dashHubHead"></tr></thead><tbody id="dashHubBody"></tbody></table>
     </div>
-    <div class="table-wrap" id="dashDateWrap" style="display:none;">
+    <div id="dashDateWrap" style="display:none;">
+      <div class="dash-life-head">
+        <h3 id="dashDateHubs">All hubs</h3>
+        <button type="button" class="btn small secondary" id="dashDateCopy" title="Copy the table — paste into Excel, Sheets, email or chat">Copy table</button>
+      </div>
+      <div class="table-wrap">
       <table class="data-table dash-hubs dash-life">
         <thead><tr><th class="c-date">Date</th><th class="num c-packed">Packed</th><th class="num c-gate">Gate-out</th><th class="num c-deliv">Delivered</th></tr></thead>
         <tbody id="dashDateBody"></tbody>
       </table>
+      </div>
     </div>
   </div>
   <div class="mini-grid" id="dashMini"></div>
@@ -4099,7 +4107,11 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
     var note = document.getElementById("dashDateNote");
     note.style.display = isDate ? "block" : "none";
     if (!d) return;
-    var rows = d.dateWise || [];
+    // Never show a day after today (IST), whatever the server sends.
+    var todayIso = istToday();
+    var rows = (d.dateWise || []).filter(function (r) { return r.date <= todayIso; });
+    dashDateRows = rows;
+    document.getElementById("dashDateHubs").textContent = dashHubsHeading(d);
     note.textContent = "Shipments (distinct return tracking IDs) by the day they were packed; Gate-out and Delivered are how many of that day's packed shipments have since gone through gate-out and been delivered. " +
       "Bold = well above the period's daily average; red 0 = packed that day but nothing gated out yet. " +
       (d.months.length ? "Every day of " + d.months.map(monthLabel).join(", ") + "." : "Last 30 days — pick months above for older dates.");
@@ -4131,6 +4143,50 @@ table.invoice-table tfoot td { border-bottom: none; border-top: 2px solid #1A1A1
       : "<tr><td colspan='4' class='empty-state'>No days in this period.</td></tr>";
   }
   function dashFmtDdMm(iso) { var p = iso.split("-"); return p[2] + "-" + p[1] + "-" + p[0]; }
+  var dashDateRows = [];
+  // Heading over the Date wise table: the selected hubs, or "All hubs".
+  function dashHubsHeading(d) {
+    var ids = d && d.hubIds && d.hubIds.length ? d.hubIds : [];
+    return ids.length && ids.length < state.hubs.length ? ids.map(dashHubName).join(", ") : "All hubs";
+  }
+  // Copy table: rich (HTML) for email / Sheets / Excel, plus plain
+  // tab-separated text for anywhere else. Heading line says which hubs.
+  document.getElementById("dashDateCopy").addEventListener("click", function () {
+    var btn = this, d = dashData;
+    if (!d || !dashDateRows.length) { toast("Nothing to copy yet.", true); return; }
+    var heading = dashHubsHeading(d) + (d.location ? " · " + d.location + " brands" : "") +
+      " · " + (d.months.length ? d.months.map(monthLabel).join(", ") : "Last 30 days");
+    var tot = dashDateRows.reduce(function (a, r) { a.packed += r.packed; a.gateout += r.gateout; a.delivered += r.delivered; return a; }, { packed: 0, gateout: 0, delivered: 0 });
+    var body = dashDateRows.map(function (r) { return [dashFmtDdMm(r.date), r.packed, r.gateout, r.delivered]; })
+      .concat([["Total", tot.packed, tot.gateout, tot.delivered]]);
+    var head = ["Date", "Packed", "Gate-out", "Delivered"];
+    var text = heading + "\n" + [head].concat(body).map(function (r) { return r.join("\t"); }).join("\n");
+    var td = "padding:4px 10px;border:1px solid #ddd;", num = td + "text-align:right;";
+    var html = "<p><b>" + escapeHtml(heading) + "</b></p><table style='border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px'>" +
+      "<tr>" + head.map(function (h, i) { return "<th style='" + (i ? num : td) + "background:#f3f4f6'>" + h + "</th>"; }).join("") + "</tr>" +
+      body.map(function (r, j) {
+        var b = j === body.length - 1 ? "font-weight:bold;" : "";
+        return "<tr>" + r.map(function (v, i) { return "<td style='" + (i ? num : td) + b + "'>" + escapeHtml(String(v)) + "</td>"; }).join("") + "</tr>";
+      }).join("") + "</table>";
+    function done() { var old = btn.textContent; btn.textContent = "Copied ✓"; setTimeout(function () { btn.textContent = old === "Copied ✓" ? "Copy table" : old; }, 1500); }
+    function fallback() {
+      var ta = document.createElement("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      ta.remove();
+      if (ok) done(); else toast("Couldn't copy — your browser blocked it.", true);
+    }
+    if (navigator.clipboard && window.ClipboardItem) {
+      navigator.clipboard.write([new ClipboardItem({
+        "text/plain": new Blob([text], { type: "text/plain" }),
+        "text/html": new Blob([html], { type: "text/html" }),
+      })]).then(done, fallback);
+    } else if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else fallback();
+  });
   // Shipment-level export: same filters as the dashboard (months, hubs, location).
   document.getElementById("dashShipCsv").addEventListener("click", function () {
     var btn = this, qs = [], ids = dashSelectedIds();
